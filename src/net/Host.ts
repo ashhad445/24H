@@ -8,6 +8,7 @@ import { obbHitsBox, toSetLocal } from '../stops/geom';
 import { PRICES, RUSTY_SET } from '../stops/rusty';
 import { RustySim, newRustyState, type StopHost } from '../stops/RustySim';
 import { TrafficSim } from '../traffic/TrafficSim';
+import { StopsHost } from '../stops/Stops';
 import { LANE_OFFSET, baseX, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
 import { FORKS, branchAt, chapelZ, chosen, forkZ, routeOffset, setRouteChoices } from '../world/Route';
 import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
@@ -24,6 +25,7 @@ export class HostSim implements StopHost {
   readonly items: ItemSim;
   readonly rusty: RustySim;
   readonly traffic: TrafficSim;
+  readonly stops: StopsHost;
   /** Every card transaction, for the end-of-run receipt. */
   readonly ledger: LedgerEntry[] = [];
   /** World position of a player's hand (set by main from poses). */
@@ -45,6 +47,7 @@ export class HostSim implements StopHost {
       rv: newRVState(x, -LANE_OFFSET * Math.sin(yaw), yaw),
       cab: { stoveOn: false, fire: 0, smoke: 0, fuseOut: false, flat: -1, nuts: 0, brew: 0 },
       rusty: newRustyState(),
+      stops: {},
       route: FORKS.map(() => -1),
       weather: { storm: 0, wind: 0 },
       npcs: [],
@@ -69,6 +72,7 @@ export class HostSim implements StopHost {
     this.prevPose = { x: this.s.rv.x, z: this.s.rv.z, yaw: this.s.rv.yaw };
     this.rusty = new RustySim(this);
     this.traffic = new TrafficSim(this);
+    this.stops = new StopsHost(this, this.items.statics);
   }
 
   /** World position of an item, following its holder when carried. */
@@ -146,6 +150,7 @@ export class HostSim implements StopHost {
     if (id.startsWith('item:')) return this.itemAct(from, held, Number(id.slice(5)));
     if (this.rusty.act(from, id)) return;
     if (id === 'roscoe') return this.traffic.payTicket(from);
+    if (this.stops.act(from, id)) return;
     if (id.startsWith('player:')) return this.playerAct(from, held, Number(id.slice(7)));
 
     switch (id) {
@@ -193,7 +198,7 @@ export class HostSim implements StopHost {
         else if (held?.k === 'scratch') this.scratch(from, held);
         break;
       case 'fuelport':
-        if (held?.k === 'nozzle') this.rusty.pumpInto(from, held);
+        if (held?.k === 'nozzle') { if (!this.stops.pumpInto(from, held)) this.rusty.pumpInto(from, held); }
         else if (held?.k === 'jerrycan') {
           if (held.d <= 0) { this.toast('Jerrycan is empty'); break; }
           const gal = Math.min(held.d, CFG.FUEL_CAPACITY - rv.fuel);
@@ -221,6 +226,7 @@ export class HostSim implements StopHost {
       case 'radiator':
         if (held?.k === 'coolant' && held.d > 0) { rv.temp = Math.max(150, rv.temp - 70); this.useUp(held); this.sfx('pour'); this.toast('🌡️ Radiator topped up'); }
         else if (held?.k === 'energy') { rv.temp = Math.max(150, rv.temp - 30); this.items.remove(held.id); this.sfx('pour'); this.toast('Poured an energy drink in the radiator. Sure.'); }
+        else if (held?.k === 'ice') { rv.temp = Math.max(150, rv.temp - 45); this.items.remove(held.id); this.sfx('pour'); this.toast('🧊 Dumped a bag of ice on the radiator'); }
         break;
       case 'hull':
         if (held?.k === 'hammer') {
@@ -388,7 +394,7 @@ export class HostSim implements StopHost {
     this.crashCd = Math.max(0, this.crashCd - dt);
     // RV footprint: center between nose and rear, in RV-local z
     const midZ = (RV.noseZ + RV.zRear) / 2, hl = (RV.zRear - RV.noseZ) / 2;
-    for (const set of [RUSTY_SET]) {
+    for (const set of [RUSTY_SET, ...this.stops.sets()]) {
       if (Math.abs(rv.x - set.x) > 150 || Math.abs(rv.z - set.z) > 150) continue;
       const c = Math.cos(rv.yaw), sn = Math.sin(rv.yaw);
       const [cx, cz] = toSetLocal(set, rv.x + midZ * sn, rv.z + midZ * c);
@@ -478,6 +484,7 @@ export class HostSim implements StopHost {
     this.items.step(dt, accel);
     this.rusty.step(dt);
     this.traffic.step(dt);
+    this.stops.step(dt);
 
     // ---------- galley ----------
     const pan = s.items.find((i) => i.s === 'skillet');

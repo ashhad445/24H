@@ -206,7 +206,7 @@ export class RustySim {
 
     for (const it of s.items) {
       // hose tether: nozzles snap back to the pump
-      if (it.k === 'nozzle' && !it.s) {
+      if (it.k === 'nozzle' && !it.s && it.d < PUMPS.length) { // Rusty's own pumps only (kit stops use d ≥ 100)
         const w = this.h.itemWorld(it);
         const [px, pz] = PUMPS[it.d];
         const [pwx, pwz] = fromSetLocal(RUSTY_SET, px, pz);

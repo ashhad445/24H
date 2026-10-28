@@ -274,7 +274,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] HUD warnings, siren audio, mirror shows pursuers
 - [x] Fix: cabin acceleration clamped to ~1.3 g and props can only leave through the open door (crashes used to fling everything through the walls)
 - Tests: `npx tsx scripts/sim-phase4.ts`, `npx tsx scripts/sim-containment.ts`
-### Phase 5 — Route, forks, night, weather, finale  ← **core built; new stops pending**
+### Phase 5 — Route, forks, night, weather, finale, stops  ← **built, needs human playtest**
 - [x] Route model (`world/Route.ts`): road = base highway + per-fork lateral offsets, so the branch you drive down becomes the road. Host locks the branch 260 m past the split; choices sync in snapshots; World rebuilds chunks and hazards
 - [x] Fork A (mile 100): I-15 (+20 mi, smooth) vs Devil's Canyon (−15 mi, cliffs, ×2.6 potholes, ×1.6 wind). Fork B (mile 170): Motel Row vs Cactus Strip (+5 mi). Overhead green gantries + gore chevrons; the untaken branch is drawn 1.6 km then fades
 - [x] Paper map item (navigator dash): hold + M / click → parchment route map with forks, branch deltas, stops, YOU marker, time & money
@@ -285,13 +285,21 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] 4-lane highway (2 each way, double yellow, dashed lanes, speed limit 65); RV tops out ~104 mph (0–60 ≈ 13 s)
 - [x] Traffic rewrite: per-lane cars, overtaking within their side, keep-right, spaced spawns, wrecks limp to the shoulder, safe speed vs *every* obstacle ahead (no cut-out crashes). Fixed a feedback bug where cars drifted along curves (caused bunching + roaming)
 - [x] Damage softened: crashes capped at −14, rams −1.6…−2, potholes −0.6×; Roscoe only rams if you fled a ticket
-- [ ] New stops: Lucky Scorpion Diner, Canyon Junkyard, Roadside Motel, Rusty Cactus Casino, Last Chance Gas
+- [x] **Stop kit** (`stops/kit.ts`, `parts.ts`, `games.ts`, `defs.ts`, `Stops.ts`): a stop = frame (mile + branch) + parts. Parts: lot, building, table, pylon, decor, junk cars, shop + clerk (checkout zone, shoplifting), pumps (hose, tether, any price), pawn bin, vending, ice machine, motel bed, scrap loot, slot machine, roulette, blackjack, diner grill job, jukebox. Host activates a stop within 1.5 km once its branch is chosen; state lives in `shared.stops`
+- [x] **Lucky Scorpion Diner** (I-15, mile 120): Flo's counter (burgers $8, cheeseburgers $10, coffee…), grill shift job ($8 per correctly cooked patty, 6 tickets), jukebox, booths
+- [x] **Canyon Junkyard** (Devil's Canyon, mile 120): Dusty's pawn crate (sell anything: spare $45, extinguisher $18…), free scrap loot among wrecked cars, cola machine
+- [x] **Roadside Motel** (Motel Row, mile 190): Room 6 — $40 to sleep 4 h (resets hypnosis, costs hunger + time), free ice (cools the radiator), energy vending, pool
+- [x] **Rusty Cactus Casino** (Cactus Strip, mile 190): high-roller slots ($25 → $300 / $1000), penny slots, roulette ($10, red/black 2×, green 14×), blackjack ($20, 3:2 on naturals), bouncer, neon saguaro
+- [x] **Last Chance Gas** (every route, mile 230): $4/gal pumps, Earl's overpriced store, pawn crate
+- Dev: `game.tp(mile, [forkA, forkB])` teleports (host). Test: `npx tsx scripts/sim-stops.ts`
 - Dev (`?dev`): F9 Rusty's · F10 next fork · F8 chapel · F7 sandstorm · F6 jump to 22:00. Tests: `sim-phase5.ts`, `sim-parked.ts`
 ### Phase 6 — Audio, radio, juice
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑10‑29 — Phase 5 complete**: all five new stops built on the stop kit.
+
 **2026‑10‑29 — Phase 5 core built** (forks, map, night, sandstorms, chapel ending, 4-lane highway, traffic rewrite, volume menu).
 
 **2026‑10‑29 — Phase 4 built** (traffic, radar, Roscoe, Loan Shark).

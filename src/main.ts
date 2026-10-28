@@ -15,6 +15,7 @@ import { RUSTY_FRAME, RUSTY_SET } from './stops/rusty';
 import { RustyView } from './stops/RustyView';
 import { TrafficView } from './traffic/TrafficView';
 import { ChapelView } from './stops/ChapelView';
+import { StopsView } from './stops/Stops';
 import { MapView } from './ui/MapView';
 import { FORKS, chapelZ, forkZ, setRouteChoices } from './world/Route';
 import type { GameMsg, ItemState, Pose, SharedState } from './types';
@@ -70,6 +71,7 @@ player.statics.push(RUSTY_SET);
 const rusty = new RustyView(scene);
 const traffic = new TrafficView(scene, rv);
 const chapel = new ChapelView(scene);
+const stopsView = new StopsView(scene, player.statics, (n) => sound.play(n));
 const mapView = new MapView();
 const avatars = new Map<number, Avatar>();
 const raycaster = new THREE.Raycaster();
@@ -167,7 +169,17 @@ async function start() {
   };
 
   const act = (id: string, btn = 0) => net.toHost({ t: 'act', id, btn });
-  if (DEV) (window as any).game = { net, get host() { return host; }, player, rv, world, input, rusty, RUSTY_SET, get shared() { return shared; }, act };
+  if (DEV) (window as any).game = {
+    net, get host() { return host; }, player, rv, world, input, rusty, RUSTY_SET, get shared() { return shared; }, act,
+    /** Teleport the RV to a mile (host only), choosing fork branches first if given. */
+    tp(mile: number, route?: number[]) {
+      if (!host) return;
+      if (route) { host.s.route = route.slice(); setRouteChoices(host.s.route); }
+      const z = -mile / CFG.MILES_PER_METER, yaw = roadYaw(z), r = host.s.rv;
+      r.x = roadX(z) + LANE_OFFSET * Math.cos(yaw); r.z = z - LANE_OFFSET * Math.sin(yaw); r.yaw = yaw; r.speed = 0;
+      (host as any).prevPose = { x: r.x, z: r.z, yaw: r.yaw };
+    },
+  };
 
   let last = performance.now();
   let snapAcc = 0, poseAcc = 0, sprayAcc = 0, holdAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
@@ -181,7 +193,7 @@ async function start() {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     raycaster.far = PLAYER.reach;
     const ctx = { held: held?.k ?? '', cab: shared.cab };
-    for (const hit of raycaster.intersectObjects([rv.root, dyn, rusty.group], true)) {
+    for (const hit of raycaster.intersectObjects([rv.root, dyn, rusty.group, stopsView.root], true)) {
       const o = hit.object;
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (o.type === 'Sprite' || (mat && !Array.isArray(mat) && mat.transparent) || isDescendant(o, camera)) continue;
@@ -208,7 +220,7 @@ async function start() {
         return { id: '', prompt: '', hull: false };
       }
       if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : 'ROSCOE: "Card, please." (bring the debit card)' };
-      const prompt = id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
+      const prompt = id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
       return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
     }
     return { id: '', prompt: '', hull: false };
@@ -320,6 +332,7 @@ async function start() {
     const camPos = camera.getWorldPosition(new THREE.Vector3());
     world.update(rv.root.position, camPos, CFG.START_HOUR + shared.clock / 3600, shared.weather.storm, shared.weather.wind, dt);
     chapel.update(rv.root.position);
+    stopsView.update(shared, dt, rv.root.position, (id) => items.worldPosOf(id));
 
     const pan = shared.items.find((i) => i.s === 'skillet');
     const sizzle = pan && shared.cab.stoveOn && player.inRV ? 1 : 0;

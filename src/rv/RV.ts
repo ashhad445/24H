@@ -176,7 +176,7 @@ export class RVModel {
     const hood = this.box(M.cream, -1.25, 1.25, -0.03, 0.03, -0.65, 0.65, true);
     hood.position.set(0, 1.42, -3.62); hood.rotation.x = -0.12;
     const grille = this.box(M.dark, -0.75, 0.75, 0.62, 1.12, RV.noseZ, RV.noseZ + 0.06); // grille
-    this.reg('radiator', grille, (s, c) => (c.held === 'coolant' ? 'Pour coolant into radiator' : c.held === 'energy' ? 'Pour energy drink into radiator (desperate)' : s.steam ? 'Radiator is boiling over!' : ''));
+    this.reg('radiator', grille, (s, c) => (c.held === 'coolant' ? 'Pour coolant into radiator' : c.held === 'ice' ? 'Dump the ice on the radiator' : c.held === 'energy' ? 'Pour energy drink into radiator (desperate)' : s.steam ? 'Radiator is boiling over!' : ''));
     for (let i = 0; i < 5; i++) this.box(M.chrome, -0.72, 0.72, 0.66 + i * 0.1, 0.69 + i * 0.1, RV.noseZ - 0.01, RV.noseZ + 0.02);
     this.box(M.chrome, -1.36, 1.36, 0.42, 0.62, RV.noseZ - 0.08, RV.noseZ + 0.06, true); // bumper
     this.box(M.chrome, -1.38, 1.38, 0.42, 0.62, zRear + 0.04, zRear + 0.18, true); // rear bumper

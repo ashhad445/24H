@@ -31,6 +31,7 @@ export const KINDS: Record<string, ItemKind> = {
   sponge: { name: 'Sponge', r: 0.06 },
   scratch: { name: 'Scratch-off ticket', r: 0.04 },
   map: { name: 'Paper map', r: 0.08 },
+  ice: { name: 'Bag of ice', r: 0.1 },
 };
 
 export function itemName(k: string, d: number) {
@@ -133,6 +134,7 @@ export function buildItemMesh(k: string): THREE.Object3D {
       const tex = scratchTex();
       return stack([[new THREE.BoxGeometry(0.07, 0.002, 0.1), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }), 0]]);
     }
+    case 'ice': return stack([[new THREE.BoxGeometry(0.2, 0.12, 0.16), mat('#e1f5fe', { transparent: true, opacity: 0.85, roughness: 0.2 }), 0]]);
     case 'map': {
       const paper = new THREE.MeshStandardMaterial({ color: '#efe1b8', roughness: 0.9 });
       const g = stack([[new THREE.BoxGeometry(0.22, 0.012, 0.3), paper, 0]]);

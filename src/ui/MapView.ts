@@ -3,7 +3,8 @@ import { CFG } from '../config';
 import { FORKS, chosen, progressMiles, totalMiles } from '../world/Route';
 import type { SharedState } from '../types';
 
-const STOPS: [number, string][] = [[50, "Rusty's Oasis"]];
+/** Stops shown on the main line (branch stops are labelled on the fork branches). */
+const STOPS: [number, string][] = [[50, "Rusty's Oasis"], [230, 'Last Chance Gas']];
 
 export class MapView {
   private el = document.getElementById('map')!;

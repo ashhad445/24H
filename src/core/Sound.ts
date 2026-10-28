@@ -156,6 +156,11 @@ export class Sound {
       case 'honk': this.tone(420, 420, 0.35, 'square', 0.08); this.tone(520, 520, 0.35, 'square', 0.08); break;
       case 'camera': this.noiseBurst(0.05, 5000, 0.4); this.tone(2000, 2000, 0.08, 'sine', 0.15, 0.06); break;
       case 'bullhorn': this.tone(180, 220, 0.25, 'sawtooth', 0.25); this.tone(220, 160, 0.4, 'sawtooth', 0.25, 0.28); break;
+      case 'jukebox': {
+        const notes = [392, 440, 494, 587, 494, 440, 392, 330, 392, 440, 392, 294];
+        notes.forEach((f, i) => { this.tone(f, f, 0.32, 'triangle', 0.12, i * 0.34); this.tone(f / 2, f / 2, 0.3, 'square', 0.05, i * 0.34); });
+        break;
+      }
       case 'scrub': for (let i = 0; i < 3; i++) this.noiseBurst(0.09, 1800, 0.25, i * 0.1); break;
       case 'yell': this.tone(320, 520, 0.18, 'sawtooth', 0.25); this.tone(520, 260, 0.35, 'sawtooth', 0.25, 0.18); break;
       case 'bell': for (let i = 0; i < 3; i++) this.tone(1568, 1568, 0.3, 'sine', 0.2, i * 0.15); break;

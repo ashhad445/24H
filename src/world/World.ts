@@ -53,8 +53,9 @@ function lateral(z: number, off: number): [number, number] {
 // ---------- clear zones: no desert props inside stop lots ----------
 interface ClearZone { x: number; z: number; yaw: number; x0: number; x1: number; z0: number; z1: number }
 const clearZones: ClearZone[] = [];
-/** Keep scenery out of a rectangle given in a stop's local frame (call before chunks are built). */
-export function addClearZone(zone: ClearZone) { clearZones.push(zone); }
+let sceneryVersion = 0;
+/** Keep scenery out of a rectangle given in a stop's local frame. Chunks rebuild to apply it. */
+export function addClearZone(zone: ClearZone) { clearZones.push(zone); sceneryVersion++; }
 function cleared(wx: number, wz: number) {
   for (const c of clearZones) {
     const dx = wx - c.x, dz = wz - c.z; const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
@@ -313,13 +314,14 @@ export class World {
   }
 
   /** Stream chunks around focus, move sky/ground/sun, apply time of day. */
-  private builtRoute = -1;
+  private builtRoute = '';
 
   update(focus: THREE.Vector3, camPos: THREE.Vector3, hour: number, storm = 0, wind = 0, dt = 0.016) {
     this.storm = storm;
-    if (routeVersion() !== this.builtRoute) {
-      // the road beyond a fork moved: rebuild everything streamed in
-      this.builtRoute = routeVersion();
+    const ver = `${routeVersion()}:${sceneryVersion}`;
+    if (ver !== this.builtRoute) {
+      // the road beyond a fork moved, or a stop cleared its lot: rebuild what's streamed in
+      this.builtRoute = ver;
       for (const [, c] of this.chunks) { this.group.remove(c.group); c.disposables.forEach((d) => d.dispose()); }
       this.chunks.clear();
     }

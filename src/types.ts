@@ -86,6 +86,7 @@ export interface SharedState {
   cop: CopState;
   shark: { on: boolean; t: number };
   rusty: RustyState;
+  stops: Record<string, Record<string, any>>; // kit-built stops: stopId → partId → state
   cab: CabinState;
   items: ItemState[];
   crew: Record<string, CrewState>;
