@@ -14,7 +14,7 @@ export function roadDX(z: number) { return roadX(z + 0.5) - roadX(z - 0.5); }
 export function altX(z: number, fork: Fork) {
   return baseX(z) + routeOffset(z, (id) => (id === fork.id ? 1 - chosen(id) : chosen(id)));
 }
-const ALT_LEN = 1600; // how far the untaken branch is drawn past the fork
+const ALT_LEN = 3600; // how far the untaken branch is drawn past the fork
 
 /** Is (x, z) on drivable road — the main road or a fork's other branch? */
 export function onRoad(x: number, z: number, margin = ROAD_HALF + 2.3) {
@@ -27,15 +27,15 @@ export function onRoad(x: number, z: number, margin = ROAD_HALF + 2.3) {
 }
 /** Yaw that faces along the road toward −Z. */
 export function roadYaw(z: number) { return Math.atan2(roadDX(z), 1); }
-// Four-lane highway: two lanes each way. Driving toward −Z, right = +X.
+// Six-lane highway: three lanes each way. Driving toward −Z, right = +X.
 export const LANE_W = 3.6;
-/** Lane centers for traffic heading −Z (fast lane, slow lane). Oncoming lanes are the negatives. */
-export const LANES = [LANE_W / 2, LANE_W * 1.5];
-export const LANE_OFFSET = LANES[1]; // the RV starts in the right (slow) lane
-export const ROAD_HALF = LANE_W * 2 + 0.25;
+/** Lane centers for traffic heading −Z (fast, middle, slow). Oncoming lanes are the negatives. */
+export const LANES = [LANE_W / 2, LANE_W * 1.5, LANE_W * 2.5];
+export const LANE_OFFSET = LANES[2]; // the RV starts in the right (slow) lane
+export const ROAD_HALF = LANE_W * 3 + 0.25;
 
-const CHUNK = 250;
-const AHEAD = 6;
+export const CHUNK = 250;
+const AHEAD = 7;
 const BEHIND = 1;
 
 // ---------- deterministic RNG ----------
@@ -78,16 +78,16 @@ export function chunkHazards(i: number): Hazard[] {
     const r = rng(i * 7 + 31);
     const z0 = -i * CHUNK;
     const rough = branchAt(z0 - CHUNK / 2)?.rough ?? 1;
-    const n = Math.round((r() < 0.4 ? 0 : r() < 0.75 ? 1 : 2) * rough + (rough > 2 && r() < 0.6 ? 1 : 0));
+    const n = Math.round((r() < 0.55 ? 0 : r() < 0.88 ? 1 : 2) * rough + (rough > 2 && r() < 0.6 ? 1 : 0));
     for (let k = 0; k < n; k++) {
       const z = z0 - r() * CHUNK;
-      const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * 6.4);
+      const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * 10.2);
       const [x, zz] = lateral(z, off);
       h.push({ id: i * 100 + k, type: 'pothole', x, z: zz, r: 0.45 + r() * 0.35 });
     }
-    if (r() < 0.06) {
+    if (r() < 0.02) { // rare: tire debris
       const z = z0 - r() * CHUNK;
-      const [x, zz] = lateral(z, 0.8 + r() * 6.2);
+      const [x, zz] = lateral(z, 0.8 + r() * 9.8);
       h.push({ id: i * 100 + 50, type: 'debris', x, z: zz, r: 0.7 });
     }
   }
@@ -95,19 +95,37 @@ export function chunkHazards(i: number): Hazard[] {
   return h;
 }
 /** Radar speed traps: one every few chunks on the right shoulder. Limit in MPH. */
-export const SPEED_LIMIT = 65;
+export const SPEED_LIMIT = 120;
 export interface Radar { id: number; x: number; z: number; yaw: number }
 export function chunkRadar(i: number): Radar | null {
-  if (i < 2 || i % 5 !== 3) return null;
+  if (i < 2 || i % 8 !== 3) return null;
   const z = -i * CHUNK - CHUNK * 0.3;
-  const [x, zz] = lateral(z, ROAD_HALF + 2.3);
-  if (cleared(x, zz)) return null;
+  const [sx, sz] = lateral(z, ROAD_HALF + 2.3);
+  if (cleared(sx, sz)) return null;
+  const [x, zz] = lateral(z, 0); // the gantry spans the whole road
   return { id: i, x, z: zz, yaw: roadYaw(z) };
 }
 export function radarsNear(z: number): Radar[] {
   const ci = Math.floor(-z / CHUNK);
   return [chunkRadar(ci - 1), chunkRadar(ci), chunkRadar(ci + 1)].filter((r): r is Radar => !!r);
 }
+/** The next speed camera ahead of z (the RV drives toward −Z), if one is within `chunks` chunks. */
+export function nextRadar(z: number, chunks = 8): Radar | null {
+  const ci = Math.floor(-z / CHUNK);
+  for (let i = ci; i <= ci + chunks; i++) { const r = chunkRadar(i); if (r && r.z < z - 3) return r; }
+  return null;
+}
+
+/** Roadside rock piles (every other chunk, alternating shoulders). Rocks you can pick up and throw. */
+export const PILE_ROCKS = 6;
+export interface RockPile { id: number; x: number; z: number }
+export function chunkRocks(i: number): RockPile | null {
+  if (i < 1 || i % 2 !== 1) return null;
+  const z = -i * CHUNK - CHUNK * (0.45 + ((i * 37) % 10) / 100);
+  const [x, zz] = lateral(z, (i % 4 === 1 ? 1 : -1) * (ROAD_HALF + 4.2));
+  return cleared(x, zz) ? null : { id: i, x, z: zz };
+}
+
 /** Road-relative coordinates: world point at distance `z` along the road and lateral offset `off` (+ = right). */
 export function roadPoint(z: number, off: number): [number, number] { return lateral(z, off); }
 
@@ -195,6 +213,7 @@ export class World {
   private geos: Record<string, THREE.BufferGeometry>;
   private signTex: THREE.Texture[];
   private radarTex: THREE.Texture;
+  private warnTex: THREE.Texture[];
   private sunDir = new THREE.Vector3(0.3, 0.6, -0.4).normalize();
   /** 0 = night, 1 = full day */
   daylight = 1;
@@ -307,10 +326,20 @@ export class World {
       g.fillStyle = '#fff'; g.fillRect(0, 0, 128, 160); g.strokeStyle = '#111'; g.lineWidth = 6; g.strokeRect(5, 5, 118, 150);
       g.fillStyle = '#111'; g.textAlign = 'center'; g.font = 'bold 20px Arial';
       g.fillText('SPEED', 64, 32); g.fillText('LIMIT', 64, 56);
-      g.font = 'bold 62px Arial'; g.fillText(String(SPEED_LIMIT), 64, 116);
-      g.fillStyle = '#c62828'; g.font = 'bold 13px Arial'; g.fillText('RADAR ENFORCED', 64, 146);
+      g.font = 'bold 52px Arial'; g.fillText(String(SPEED_LIMIT), 64, 114);
+      g.fillStyle = '#c62828'; g.font = 'bold 13px Arial'; g.fillText('CAMERA ENFORCED', 64, 146);
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
     })();
+    this.warnTex = [500, 250].map((m) => {
+      const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+      const g = c.getContext('2d')!;
+      g.fillStyle = '#ffd600'; g.fillRect(0, 0, 128, 128); g.strokeStyle = '#111'; g.lineWidth = 6; g.strokeRect(5, 5, 118, 118);
+      g.fillStyle = '#111'; g.fillRect(34, 26, 60, 36); g.fillRect(50, 18, 26, 10);
+      g.fillStyle = '#ffd600'; g.beginPath(); g.arc(64, 44, 11, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#111'; g.beginPath(); g.arc(64, 44, 6, 0, Math.PI * 2); g.fill();
+      g.font = 'bold 15px Arial'; g.textAlign = 'center'; g.fillText('SPEED CAMERA', 64, 86); g.fillText(`AHEAD  ${m} m`, 64, 108);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+    });
   }
 
   /** Stream chunks around focus, move sky/ground/sun, apply time of day. */
@@ -424,7 +453,7 @@ export class World {
     const fz = forkZ(f);
     const chev = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.0, 0.1), new THREE.MeshStandardMaterial({ color: '#ffd600', emissive: '#ffb300', emissiveIntensity: 0.4 }));
     disposables.push(chev.geometry);
-    const [cx, cz] = [(roadX(fz - 260) + altX(fz - 260, f)) / 2, fz - 260];
+    const [cx, cz] = [(roadX(fz - 650) + altX(fz - 650, f)) / 2, fz - 650];
     chev.position.set(cx, 0.9, cz); chev.rotation.y = roadYaw(fz);
     group.add(chev);
   }
@@ -450,7 +479,7 @@ export class World {
       add(ribbon(za, zb, 0.08, 0.22, y + 0.012, 5, xf), this.mats.yellow);
       const dashes: THREE.BufferGeometry[] = [];
       for (let z = za - (((za % 12) + 12) % 12); z > zb; z -= 12) {
-        for (const off of [-LANE_W, LANE_W]) dashes.push(ribbon(z, Math.max(zb, z - 5), off - 0.07, off + 0.07, y + 0.012, 3, xf));
+        for (const off of [-2 * LANE_W, -LANE_W, LANE_W, 2 * LANE_W]) dashes.push(ribbon(z, Math.max(zb, z - 5), off - 0.07, off + 0.07, y + 0.012, 3, xf));
       }
       if (dashes.length) { add(mergeGeometries(dashes), this.mats.white); dashes.forEach((d) => d.dispose()); }
     };
@@ -539,19 +568,37 @@ export class World {
       }
     }
 
-    // radar speed-trap sign
+    // speed camera gantry across the whole road (+ two advance warning signs on the shoulder)
     const radar = chunkRadar(i);
     if (radar) {
       const g = new THREE.Group();
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 0.12).translate(0, 1.3, 0), this.mats.post);
-      const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.4), new THREE.MeshStandardMaterial({ map: this.radarTex, roughness: 0.6 }));
-      plate.position.set(0, 2.5, 0.08);
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 0.3), this.mats.pothole); box.position.set(0, 1.6, 0.1);
-      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.07, 12), new THREE.MeshStandardMaterial({ color: '#111', emissive: '#ff1744', emissiveIntensity: 1.5 }));
-      lens.position.set(0, 1.6, 0.26);
-      g.add(post, plate, box, lens);
+      const span = ROAD_HALF + 1.6;
+      const steel = this.mats.post;
+      for (const sx of [-span, span]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 7.2, 0.4).translate(sx, 3.6, 0), steel); post.castShadow = true; g.add(post); disposables.push(post.geometry);
+      }
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 0.8, 0.6, 0.5).translate(0, 7.0, 0), steel); beam.castShadow = true; g.add(beam); disposables.push(beam.geometry);
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.0), new THREE.MeshStandardMaterial({ map: this.radarTex, roughness: 0.6, emissive: new THREE.Color('#333'), emissiveMap: this.radarTex }));
+      plate.position.set(0, 5.1, 0.27); g.add(plate); disposables.push(plate.geometry);
+      for (const cx of [-LANES[1], LANES[1]]) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 1.1).translate(cx, 6.2, 0.45), this.mats.pothole); box.castShadow = true; g.add(box); disposables.push(box.geometry);
+        const lens = new THREE.Mesh(new THREE.CircleGeometry(0.2, 14), new THREE.MeshStandardMaterial({ color: '#111', emissive: '#ff1744', emissiveIntensity: 1.8 }));
+        lens.position.set(cx, 6.2, 1.01); g.add(lens); disposables.push(lens.geometry);
+      }
       g.position.set(radar.x, 0, radar.z);
-      g.rotation.y = radar.yaw; // face oncoming RV (+Z side of the sign faces back down the road)
+      g.rotation.y = radar.yaw; // the +Z faces look back down the road at the oncoming RV
+      group.add(g);
+    }
+    for (const [ahead, ti] of [[1, 0], [2, 1]] as const) {
+      if (!chunkRadar(i + ahead)) continue;
+      const z = -i * CHUNK - CHUNK * 0.35;
+      const [wx, wz] = lateral(z, ROAD_HALF + 2.6);
+      if (cleared(wx, wz)) continue;
+      const g = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.2, 0.12).translate(0, 1.6, 0), this.mats.post);
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshStandardMaterial({ map: this.warnTex[ti], roughness: 0.6, emissive: new THREE.Color('#333'), emissiveMap: this.warnTex[ti] }));
+      plate.position.set(0, 3.0, 0.08);
+      g.add(post, plate); g.position.set(wx, 0, wz); g.rotation.y = roadYaw(z);
       disposables.push(post.geometry, plate.geometry);
       group.add(g);
     }

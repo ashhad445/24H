@@ -5,13 +5,13 @@ import type { NPCState, SharedState } from '../types';
 import { LANES, ROAD_HALF, SPEED_LIMIT, radarsNear, roadDX, roadPoint, roadX, roadYaw } from '../world/World';
 
 export const NPC_DIMS: Record<NPCState['k'], [number, number]> = { // half width, half length
-  sedan: [0.9, 2.2], pickup: [1.0, 2.5], camper: [1.15, 3.0], cop: [0.95, 2.4], shark: [0.95, 2.3],
+  sedan: [0.9, 2.2], pickup: [1.0, 2.5], camper: [1.15, 3.0], cop: [0.95, 2.4], shark: [0.95, 2.3], semi: [1.25, 4.6],
 };
 
 export interface TrafficHost {
   s: SharedState;
   toast(text: string): void;
-  sfx(name: string): void;
+  sfx(name: string, at?: [number, number, number]): void;
   joltAll(mag: number): void;
   charge(from: number, amount: number, what: string): boolean;
   held(id: number): { k: string } | undefined;
@@ -21,7 +21,7 @@ export interface TrafficHost {
 interface Lane { dir: 1 | -1; lane: number; off: number; latV: number; cruise: number; changeCd: number; s: number /* road parameter (z on the centerline) */ }
 
 const MPH = CFG.MPH;
-const COUNT = { same: 7, oncoming: 5 };
+const COUNT = { same: 10, oncoming: 8 };
 const laneOff = (dir: 1 | -1, lane: number) => dir * LANES[lane];
 
 export class TrafficSim {
@@ -33,6 +33,8 @@ export class TrafficSim {
   private ramCd = 0;
   private sharkDelay = 12;
   private bullhornCd = 0;
+  private copHp = 3;
+  private wreckT = 0;
 
   constructor(private h: TrafficHost) {}
 
@@ -66,15 +68,17 @@ export class TrafficSim {
   private spawnTraffic(dir: 1 | -1) {
     const R = this.rvRoad();
     for (let attempt = 0; attempt < 6; attempt++) {
-      const lane = Math.random() < (dir === 1 ? 0.6 : 0.5) ? 1 : 0; // most traffic keeps right
+      const roll = Math.random();
+      const lane = roll < 0.5 ? 2 : roll < 0.82 ? 1 : 0; // most traffic keeps right
       // same direction: mostly ahead at a range of speeds, some faster ones from behind
-      const behind = dir === 1 && Math.random() < 0.35;
-      const z = dir === 1 ? (behind ? R.z + 220 + Math.random() * 250 : R.z - 300 - Math.random() * 550) : R.z - 450 - Math.random() * 500;
-      const cruise = dir === -1 ? 25 + Math.random() * 8 : behind ? 33 + Math.random() * 6 : (lane === 0 ? 30 : 25) + Math.random() * 7;
+      const behind = dir === 1 && Math.random() < 0.3;
+      const z = dir === 1 ? (behind ? R.z + 350 + Math.random() * 450 : R.z - 550 - Math.random() * 900) : R.z - 700 - Math.random() * 900;
+      const base = lane === 0 ? 55 : lane === 1 ? 47 : 39; // m/s: ~123 / 105 / 87 mph
+      const cruise = dir === -1 ? 40 + Math.random() * 20 : behind ? 62 + Math.random() * 10 : base + Math.random() * 8;
       const off = laneOff(dir, lane);
       // keep spawns spaced out so cars don't start in a clump
-      if (!this.laneClear(dir, off, z, 70, 70, 1.2)) continue;
-      const kinds: NPCState['k'][] = ['sedan', 'sedan', 'sedan', 'pickup', 'pickup', 'camper'];
+      if (!this.laneClear(dir, off, z, 130, 130, 1.2)) continue;
+      const kinds: NPCState['k'][] = ['sedan', 'sedan', 'sedan', 'pickup', 'pickup', 'camper', 'semi'];
       const k = kinds[Math.floor(Math.random() * kinds.length)];
       const [x, zz] = roadPoint(z, off);
       const npc: NPCState = { id: this.nextId++, k, x, z: zz, yaw: roadYaw(z) + (dir === 1 ? 0 : Math.PI), speed: cruise, c: Math.floor(Math.random() * 6), w: 0 };
@@ -102,7 +106,7 @@ export class TrafficSim {
     for (const n of [...s.npcs]) {
       const L = this.lanes.get(n.id);
       if (!L) continue;
-      if (Math.abs(n.z - R.z) > 1000) { this.removeNpc(n.id); continue; }
+      if (Math.abs(n.z - R.z) > 2000) { this.removeNpc(n.id); continue; }
       const [hw] = NPC_DIMS[n.k];
       L.changeCd = Math.max(0, L.changeCd - dt);
 
@@ -126,7 +130,7 @@ export class TrafficSim {
       const wantOff = laneOff(L.dir, L.lane);
       const overlaps = (ooff: number, w: number) => Math.min(Math.abs(ooff - L.off), Math.abs(ooff - wantOff)) < w;
       const consider = (g: number, sp: number) => {
-        if (g <= -1 || g > 170) return;
+        if (g <= -1 || g > 420) return;
         if (g < gap) { gap = g; leaderSpeed = sp; }
         safe = Math.min(safe, g < 8 ? 0 : Math.max(0, sp) + Math.sqrt(2 * 4.5 * (g - 8)));
       };
@@ -143,20 +147,20 @@ export class TrafficSim {
 
       // lane changes (only within my side of the road)
       if (L.changeCd <= 0 && Math.abs(L.off - laneOff(L.dir, L.lane)) < 0.2) {
-        const other = 1 - L.lane;
-        const otherOff = laneOff(L.dir, other);
-        if (gap < 70 && leaderSpeed < L.cruise - 2) {
-          // blocked by someone slow: overtake if the other lane is clear
-          if (this.laneClear(L.dir, otherOff, n.z, 25, 90, hw, n)) { L.lane = other; L.changeCd = 5; }
-        } else if (L.lane === 0 && this.laneClear(L.dir, laneOff(L.dir, 1), n.z, 25, 90, hw, n)) {
-          // keep right when the slow lane is open
-          L.lane = 1; L.changeCd = 6;
+        const free = (l: number) => l >= 0 && l < LANES.length && this.laneClear(L.dir, laneOff(L.dir, l), n.z, 45, 150, hw, n);
+        const pref = L.cruise > 53 ? 0 : L.cruise > 45 ? 1 : 2; // fast cars like the inside lane
+        if (gap < 130 && leaderSpeed < L.cruise - 2) {
+          // blocked by someone slow: overtake on the inside if it's clear, else try the other side
+          if (free(L.lane - 1)) { L.lane--; L.changeCd = 5; } else if (free(L.lane + 1)) { L.lane++; L.changeCd = 5; }
+        } else if (L.lane < pref && free(L.lane + 1)) {
+          // drift back toward my preferred lane once the overtake is done
+          L.lane++; L.changeCd = 6;
         }
       }
 
       // speed: cruise, never faster than we can stop within the gap
       const target = Math.min(L.cruise, safe);
-      n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), (target > n.speed ? 2.4 : 8) * dt);
+      n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), (target > n.speed ? 3.2 : 9) * dt);
 
       // smooth lateral motion toward the lane center (eased so cars steer, not slide)
       const latTarget = Math.max(-2.2, Math.min(2.2, (laneOff(L.dir, L.lane) - L.off) * 1.6));
@@ -215,7 +219,7 @@ export class TrafficSim {
     let dy = want - n.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     n.yaw += Math.max(-1.6 * dt, Math.min(1.6 * dt, dy));
     const target = d < stopAt ? 0 : Math.min(vmax, Math.max(0, (d - stopAt) * 0.9 + Math.abs(this.s.rv.speed)));
-    n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), 9 * dt);
+    n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), 14 * dt);
     n.x += -Math.sin(n.yaw) * n.speed * dt;
     n.z += -Math.cos(n.yaw) * n.speed * dt;
     return d;
@@ -229,8 +233,9 @@ export class TrafficSim {
 
   private spawnChaser(k: 'cop' | 'shark') {
     const R = this.rvRoad();
-    const [x, z] = roadPoint(R.z + 280, LANES[0]);
-    const npc: NPCState = { id: this.nextId++, k, x, z, yaw: roadYaw(R.z + 280), speed: 32, c: 0, w: 0 };
+    const [x, z] = roadPoint(R.z + 480, LANES[0]);
+    const npc: NPCState = { id: this.nextId++, k, x, z, yaw: roadYaw(R.z + 480), speed: 60, c: 0, w: 0 };
+    if (k === 'cop') this.copHp = 3;
     this.s.npcs.push(npc);
     return npc;
   }
@@ -240,6 +245,8 @@ export class TrafficSim {
     let car = this.chaser('cop');
     this.ramCd = Math.max(0, this.ramCd - dt);
     if (cop.phase === 0) {
+      // a cruiser wrecked by a rock lingers a while, then gets towed
+      if (car) { if ((this.wreckT += dt) > 14) { this.removeNpc(car.id); this.wreckT = 0; } return; }
       if (s.heat > 0) {
         this.copDelay -= dt;
         if (this.copDelay <= 0) {
@@ -255,7 +262,7 @@ export class TrafficSim {
 
     if (cop.phase === 1 || cop.phase === 2) {
       const [tx, tz] = this.behindRV(12);
-      this.drive(car, tx, tz, 48, dt, 1);
+      this.drive(car, tx, tz, 100, dt, 1);
       if (dist < 25) cop.phase = 2;
       this.stoppedT = Math.abs(rv.speed) < 0.6 && dist < 30 ? this.stoppedT + dt : 0;
       if (this.stoppedT > 2) {
@@ -277,9 +284,32 @@ export class TrafficSim {
       }
     } else if (cop.phase === 4) {
       const [tx, tz] = this.behindRV(-400, -LANES[0]);
-      this.drive(car, tx, tz, 42, dt);
+      this.drive(car, tx, tz, 60, dt);
       if (cop.t > 20 || dist > 350) { this.s.npcs = this.s.npcs.filter((n) => n !== car); cop.phase = 0; this.copDelay = 30; }
     }
+  }
+
+  /** Is there a cruiser that a thrown rock could hit? */
+  hittableCop() {
+    const car = this.chaser('cop');
+    return car && car.w <= 0 && (this.s.cop.phase === 1 || this.s.cop.phase === 2) ? car : null;
+  }
+
+  /** A rock smashes into Roscoe's cruiser. Returns true when that finishes it. */
+  hitCop(): boolean {
+    const car = this.chaser('cop'), s = this.s;
+    if (!car) return false;
+    this.copHp--; car.speed *= 0.85;
+    this.h.sfx('crunch', [car.x, 1, car.z]);
+    if (this.copHp > 0) {
+      this.h.toast(`🪨 DIRECT HIT on Roscoe's cruiser! (${this.copHp} more)`);
+      return false;
+    }
+    car.w = 14; car.speed = 0;
+    s.cop.phase = 0; s.cop.fled = false; s.heat = 0; this.copDelay = 45; this.wreckT = 0;
+    this.h.sfx('bang', [car.x, 1, car.z]);
+    this.h.toast('💥 The windshield caves in! Roscoe\'s cruiser spins into the ditch. Chase over — heat cleared.');
+    return true;
   }
 
   /** Paying Roscoe at the window. */
@@ -310,7 +340,7 @@ export class TrafficSim {
     if (!car) { s.shark.on = false; return; }
     if (s.money >= 0) {
       const [tx, tz] = this.behindRV(500, -6);
-      this.drive(car, tx, tz, 45, dt);
+      this.drive(car, tx, tz, 95, dt);
       if (Math.hypot(car.x - rv.x, car.z - rv.z) > 300) {
         this.s.npcs = this.s.npcs.filter((n) => n !== car); s.shark.on = false; this.sharkDelay = 12;
         this.h.toast('🦈 The Loan Shark backs off. For now.');
@@ -321,7 +351,7 @@ export class TrafficSim {
     const dist = Math.hypot(car.x - rv.x, car.z - rv.z);
     const attacking = s.shark.t <= 0;
     const [tx, tz] = this.behindRV(attacking ? 4 : 16, attacking ? (Math.random() < 0.5 ? -0.8 : 0.8) : 0);
-    this.drive(car, tx, tz, 52, dt, attacking ? 0 : 1);
+    this.drive(car, tx, tz, 98, dt, attacking ? 0 : 1);
     if (attacking && dist < 7.2) {
       this.ram(car, 0.8);
       s.shark.t = 9 + Math.random() * 5;
@@ -339,7 +369,7 @@ export class TrafficSim {
     rv.yaw += (Math.random() < 0.5 ? -1 : 1) * 0.07 * mag;
     rv.integrity = Math.max(0, rv.integrity - 2 * mag);
     car.speed *= 0.4;
-    this.h.sfx('bang');
+    this.h.sfx('crunch');
     this.h.joltAll(mag);
   }
 
@@ -362,7 +392,7 @@ export class TrafficSim {
       // the RV is a big steel box: crashes hurt, but one crash never totals it
       rv.integrity = Math.max(0, rv.integrity - Math.min(14, rel * 0.35));
       n.w = 8; n.speed *= 0.3;
-      this.h.sfx('bang');
+      this.h.sfx('crunch'); this.h.sfx('bang');
       this.h.joltAll(mag);
       const headOn = Math.cos(n.yaw - rv.yaw) < -0.5;
       this.h.toast(headOn && rel > 15 ? `💥 HEAD-ON at ${Math.round(rel * MPH)} mph closing speed!` : rel > 15 ? '💥 SMASH!' : '💥 Fender bender!');

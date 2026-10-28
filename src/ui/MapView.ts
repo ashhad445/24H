@@ -4,7 +4,7 @@ import { FORKS, chosen, progressMiles, totalMiles } from '../world/Route';
 import type { SharedState } from '../types';
 
 /** Stops shown on the main line (branch stops are labelled on the fork branches). */
-const STOPS: [number, string][] = [[50, "Rusty's Oasis"], [230, 'Last Chance Gas']];
+const STOPS: [number, string][] = [[100, "Rusty's Oasis"], [460, 'Last Chance Gas']];
 
 export class MapView {
   private el = document.getElementById('map')!;
@@ -34,7 +34,7 @@ export class MapView {
     // map miles to x along a wobbly route line
     const X0 = 70, X1 = W - 90, Y = 340;
     const mx = (mile: number) => X0 + ((X1 - X0) * mile) / Math.max(total, CFG.ROUTE_MILES + 20);
-    const wob = (mile: number) => Y + Math.sin(mile / 18) * 14;
+    const wob = (mile: number) => Y + Math.sin(mile / 36) * 14;
 
     // main road
     g.strokeStyle = '#8d1f1f'; g.lineWidth = 7; g.lineCap = 'round';
@@ -53,12 +53,12 @@ export class MapView {
         g.setLineDash(decided && !taken ? [8, 8] : []);
         g.strokeStyle = b.canyon ? '#b5532a' : '#8d1f1f'; g.lineWidth = 5;
         g.beginPath(); g.moveTo(mx(f.mile), wob(f.mile));
-        g.quadraticCurveTo(mx(f.mile + 8), wob(f.mile) + dy, mx(f.mile + 22), wob(f.mile) + dy);
+        g.quadraticCurveTo(mx(f.mile + 16), wob(f.mile) + dy, mx(f.mile + 44), wob(f.mile) + dy);
         g.stroke();
         g.fillStyle = '#3e2410'; g.font = 'bold 17px Georgia, serif'; g.textAlign = 'left';
-        g.fillText(`${b.name} (${b.delta > 0 ? '+' : ''}${b.delta} mi)`, mx(f.mile + 22) + 8, wob(f.mile) + dy - 4);
+        g.fillText(`${b.name} (${b.delta > 0 ? '+' : ''}${b.delta} mi)`, mx(f.mile + 44) + 8, wob(f.mile) + dy - 4);
         g.font = 'italic 15px Georgia, serif';
-        g.fillText(`→ ${b.stop}`, mx(f.mile + 22) + 8, wob(f.mile) + dy + 16);
+        g.fillText(`→ ${b.stop}`, mx(f.mile + 44) + 8, wob(f.mile) + dy + 16);
         g.restore();
       });
       g.fillStyle = '#3e2410'; g.font = 'bold 15px Arial'; g.textAlign = 'center';

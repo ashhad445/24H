@@ -1,15 +1,15 @@
-// Rusty's Oasis Gas & Slots — Mile 50. Layout shared by the host sim (colliders, zones)
+// Rusty's Oasis Gas & Slots — Mile 100. Layout shared by the host sim (colliders, zones)
 // and the client view (meshes). Coordinates are stop-local: origin on the road centerline,
 // −Z = road forward, +X = right side of the road (the lot).
 import { CFG } from '../config';
 import type { Box2 } from '../rv/RV';
-import { addClearZone, roadPoint, roadYaw } from '../world/World';
+import { ROAD_HALF, addClearZone, roadPoint, roadYaw } from '../world/World';
 import type { StaticSet } from './geom';
 
-export const RUSTY_MILE = 50;
+export const RUSTY_MILE = 100;
 const Z0 = -RUSTY_MILE / CFG.MILES_PER_METER;
 // origin sits 5 m right of the centerline so the lot clears the 4-lane road
-const [FX, FZ] = roadPoint(Z0, 5);
+const [FX, FZ] = roadPoint(Z0, ROAD_HALF - 2.45);
 export const RUSTY_FRAME = { x: FX, z: FZ, yaw: roadYaw(Z0) };
 
 export const PRICES = { gas: 2.5, slot: 5, crab: 15, crabWin: 45, wash: 35, overdraftLimit: -100 };
@@ -57,7 +57,7 @@ export const onCounter = (x: number, y: number, z: number) => x > COUNTER.x0 - 0
 // ---------- merchandise (kind, price, count) ----------
 export const PRODUCTS: [string, number, number][] = [
   ['patty', 3, 6], ['bun', 1.5, 6], ['cheese', 1, 6], ['coffee', 2, 3], ['energy', 4, 4], ['soda', 2, 4],
-  ['coolant', 12, 2], ['tape', 8, 2], ['fuse', 3, 3], ['extinguisher', 25, 1], ['spare', 60, 1],
+  ['coolant', 12, 2], ['tape', 8, 2], ['fuse', 3, 3], ['extinguisher', 25, 1], ['spare', 60, 1], ['rocket', 55, 1],
 ];
 export const SCRATCH_PRICE = 5;
 export const SCRATCH_COUNT = 6;

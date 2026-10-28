@@ -11,7 +11,7 @@ const run = (sec: number, th: number, br = 0, st = 0, autoShift = false) => {
   while (t < end) {
     const ev = stepRV(rv, aux, { th, br, st, horn: false }, dt, false);
     if (ev.length) console.log(`  t=${t.toFixed(1)} events: ${ev.join(',')}`);
-    if (autoShift && rv.gear >= 1 && rv.gear < 5 && rv.speed / (gearInfo(rv.gear).top / CFG.MPH) > 0.95) {
+    if (autoShift && rv.gear >= 1 && rv.gear < 7 && rv.speed / (gearInfo(rv.gear).top / CFG.MPH) > 0.95) {
       shift(rv, 1); console.log(`  t=${t.toFixed(1)} → gear ${rv.gear} at ${(rv.speed * CFG.MPH).toFixed(0)} mph`);
     }
     t += dt;

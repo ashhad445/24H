@@ -1,6 +1,7 @@
 // Host-only RV simulation: arcade bicycle model + manual gearbox, fuel, temperature.
-import { CFG, ENGINE, WHEELBASE, gearInfo } from '../config';
+import { CFG, ENGINE, NOS, WHEELBASE, gearInfo } from '../config';
 import type { DriveInput, RVState } from '../types';
+import { CHARM2_QUOTES, CHARM_QUOTES } from './charmQuotes';
 
 export interface RVAux { crankT: number; lugT: number; hornT: number }
 
@@ -8,7 +9,8 @@ export function newRVState(x: number, z: number, yaw: number): RVState {
   return {
     x, z, yaw, speed: 0, steer: 0, gear: 0, rpm: 0,
     fuel: CFG.START_FUEL, temp: 95, ignition: 0,
-    handbrake: true, headlights: false, wipers: false, dome: false, radio: false,
+    handbrake: true, headlights: false, wipers: false, dome: false, radio: false, station: 0, charm: Math.floor(Math.random() * CHARM_QUOTES.length), charm2: Math.floor(Math.random() * CHARM2_QUOTES.length),
+    nos: NOS.CHARGES, nosT: 0, rocks: 0, rearWin: false,
     doorOpen: false, horn: false, steam: false,
     grime: 0.15, integrity: 100, odometer: 0, throttle: 0, brake: 0,
   };
@@ -29,6 +31,8 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
     }
   }
   const on = rv.ignition === 2;
+  const boost = on && rv.nosT > 0;
+  if (rv.nosT > 0) rv.nosT = Math.max(0, rv.nosT - dt);
   const th = on ? clamp(input.th, 0, 1) : 0;
   rv.throttle = th;
   rv.brake = clamp(input.br, 0, 1);
@@ -38,7 +42,7 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
   const topMs = Math.abs(g.top) / CFG.MPH;
   const wheelR = rv.gear !== 0 ? Math.abs(rv.speed) / topMs : 0; // 0..1 of gear band
   let targetRpm = 0;
-  if (on) targetRpm = rv.gear === 0 ? IDLE + th * (REDLINE - IDLE) * 0.92 : Math.max(IDLE, wheelR * REDLINE * 0.97);
+  if (on) targetRpm = rv.gear === 0 ? IDLE + th * (REDLINE - IDLE) * 0.92 : Math.min(REDLINE * 1.08, Math.max(IDLE, wheelR * REDLINE * 0.97));
   rv.rpm += (targetRpm - rv.rpm) * Math.min(1, dt * (rv.gear === 0 ? 4 : 12));
 
   // drive force
@@ -46,8 +50,8 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
   const dir = rv.gear === -1 ? -1 : 1;
   if (on && rv.gear !== 0) {
     let torque = 0.45 + 0.55 * Math.sin(Math.PI * Math.min(wheelR, 1) * 0.85 + 0.15);
-    if (wheelR >= 1) torque = 0; // rev limiter
-    let power = th * torque * g.acc;
+    if (wheelR >= (boost ? NOS.OVER : 1)) torque = 0; // rev limiter (nitrous lifts it)
+    let power = th * torque * g.acc + (boost && wheelR < NOS.OVER ? NOS.ACC * (0.5 + 0.5 * th) : 0);
     if (rv.steam) power *= 0.55;
     acc += dir * power;
     // idle creep in 1st / R
@@ -80,15 +84,16 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
   }
 
   // temperature
-  const airflow = Math.min(1, Math.abs(rv.speed) / 20) * 10;
-  const target = on ? 175 + 60 * (rv.rpm / REDLINE) * (0.3 + 0.7 * th) + (rv.rpm > 5600 ? 40 : 0) - airflow : 95;
+  const airflow = Math.min(1, Math.abs(rv.speed) / 60) * 36; // fast air cools the radiator
+  const target = on ? 175 + 60 * (rv.rpm / REDLINE) * (0.3 + 0.7 * th) + (rv.rpm > 5600 ? 40 : 0) + (boost ? 30 : 0) - airflow : 95;
   rv.temp += (target - rv.temp) * dt * 0.02;
   if (!rv.steam && rv.temp > ENGINE.OVERHEAT_F) { rv.steam = true; ev.push('overheat'); }
   if (rv.steam && rv.temp < ENGINE.OVERHEAT_CLEAR_F) rv.steam = false;
 
   // steering (input + = left). Max angle shrinks with speed.
   const v = Math.abs(rv.speed);
-  const maxSteer = 0.6 / (1 + Math.pow(v / 6, 1.3));
+  // also capped to ~1.7 g of lateral accel so 200 mph isn't a coin flip
+  const maxSteer = Math.min(0.6 / (1 + Math.pow(v / 6, 1.3)), (17 * WHEELBASE) / Math.max(1, v * v));
   const targetSteer = clamp(input.st, -1, 1) * maxSteer;
   const rate = input.st === 0 ? 2.5 : 1.4;
   rv.steer += clamp(targetSteer - rv.steer, -rate * dt, rate * dt);
@@ -112,7 +117,7 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
 
 /** Try to shift by dir. Returns 'shift', 'grind' or null. */
 export function shift(rv: RVState, dir: number): 'shift' | 'grind' | null {
-  const ng = clamp(rv.gear + dir, -1, 5);
+  const ng = clamp(rv.gear + dir, -1, 7);
   if (ng === rv.gear) return null;
   if (ng === -1 && rv.speed > 1.5) return 'grind';
   if (ng >= 1 && rv.speed < -1) return 'grind';

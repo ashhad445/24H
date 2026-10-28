@@ -1,5 +1,5 @@
 // Authoritative simulation. Runs only on the host; clients send intents.
-import { CFG, RV, SURV } from '../config';
+import { CFG, NOS, RADIO_STATIONS, RV, SURV } from '../config';
 import { ItemSim } from '../items/ItemPhysics';
 import { KINDS, START_ITEMS, itemName } from '../items/Items';
 import { newRVState, shift, stepRV, type RVAux } from '../rv/Drivetrain';
@@ -7,9 +7,11 @@ import type { Box2 } from '../rv/RV';
 import { obbHitsBox, toSetLocal } from '../stops/geom';
 import { PRICES, RUSTY_SET } from '../stops/rusty';
 import { RustySim, newRustyState, type StopHost } from '../stops/RustySim';
-import { TrafficSim } from '../traffic/TrafficSim';
+import { NPC_DIMS, TrafficSim } from '../traffic/TrafficSim';
 import { StopsHost } from '../stops/Stops';
-import { LANE_OFFSET, baseX, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
+import { CHARM2_QUOTES, CHARM_QUOTES } from '../rv/charmQuotes';
+import { GROOM, Groom } from './Groom';
+import { LANE_OFFSET, PILE_ROCKS, baseX, chunkRocks, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
 import { FORKS, branchAt, chapelZ, chosen, forkZ, routeOffset, setRouteChoices } from '../world/Route';
 import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
 
@@ -26,6 +28,7 @@ export class HostSim implements StopHost {
   readonly rusty: RustySim;
   readonly traffic: TrafficSim;
   readonly stops: StopsHost;
+  private groom = new Groom((text) => this.emit({ t: 'ev', k: 'text', from: GROOM, text }));
   /** Every card transaction, for the end-of-run receipt. */
   readonly ledger: LedgerEntry[] = [];
   /** World position of a player's hand (set by main from poses). */
@@ -39,6 +42,10 @@ export class HostSim implements StopHost {
   private hornCd = 0;
   private hammerCd = new Map<number, number>();
   private warned = new Set<string>();
+  /** Seconds of blowout immunity after a flat (so tires don't pop back-to-back). */
+  private tireGrace = 60;
+  /** Rocks left in each roadside pile (chunk index → count). */
+  private pileLeft = new Map<number, number>();
 
   constructor(private emit: (msg: GameMsg) => void, colliders: (doorOpen: boolean) => Box2[] = () => []) {
     const yaw = roadYaw(0);
@@ -105,7 +112,7 @@ export class HostSim implements StopHost {
   }
 
   toast(text: string) { this.emit({ t: 'ev', k: 'toast', text }); }
-  sfx(name: string) { this.emit({ t: 'ev', k: 'sfx', name }); }
+  sfx(name: string, at?: [number, number, number]) { this.emit(at ? { t: 'ev', k: 'sfx', name, at } : { t: 'ev', k: 'sfx', name }); }
   private once(key: string, text: string) { if (!this.warned.has(key)) { this.warned.add(key); this.toast(text); } }
   name(id: number) { return this.names(id); }
   names: (id: number) => string = (id) => `Bean ${id}`;
@@ -148,6 +155,7 @@ export class HostSim implements StopHost {
     const held = this.held(from);
 
     if (id.startsWith('item:')) return this.itemAct(from, held, Number(id.slice(5)));
+    if (id.startsWith('rocks:')) return this.rockPile(from, held, Number(id.slice(6)));
     if (this.rusty.act(from, id)) return;
     if (id === 'roscoe') return this.traffic.payTicket(from);
     if (this.stops.act(from, id)) return;
@@ -177,6 +185,33 @@ export class HostSim implements StopHost {
       case 'wipers': rv.wipers = !rv.wipers; this.sfx('click'); break;
       case 'dome': rv.dome = !rv.dome; this.sfx('click'); break;
       case 'radio': rv.radio = !rv.radio; this.sfx('click'); break;
+      case 'charm': { rv.charm = (rv.charm + 1 + Math.floor(Math.random() * (CHARM_QUOTES.length - 1))) % CHARM_QUOTES.length; this.sfx('clank'); this.toast(`💀 "${CHARM_QUOTES[rv.charm]}"`); break; }
+      case 'charm2': { rv.charm2 = (rv.charm2 + 1 + Math.floor(Math.random() * (CHARM2_QUOTES.length - 1))) % CHARM2_QUOTES.length; this.sfx('clank'); this.toast(`⚰️ "${CHARM2_QUOTES[rv.charm2]}"`); break; }
+      case 'nos':
+        if (!isDriver) break;
+        if (rv.ignition !== 2) { this.toast('Start the engine first'); break; }
+        if (rv.nosT > 0) break;
+        if (rv.nos <= 0) { this.toast('💨 The nitrous tank is empty — gas stations sell rocket fuel (pricey)'); this.sfx('error'); break; }
+        rv.nos--; rv.nosT = NOS.BURN; this.sfx('nos');
+        this.toast(`🚀 NITROUS! ${rv.nos} ${rv.nos === 1 ? 'shot' : 'shots'} left`);
+        break;
+      case 'nos_tank':
+        if (held?.k === 'rocket') {
+          if (rv.nos >= NOS.CHARGES) { this.toast('The nitrous tank is already full'); break; }
+          rv.nos = NOS.CHARGES; this.items.remove(held.id); this.sfx('pour');
+          this.toast('🚀 Rocket fuel in — nitrous tank full (3 shots)');
+        }
+        break;
+      case 'rockbin':
+        if (held?.k === 'rock') {
+          if (rv.rocks >= 12) { this.toast('The rock bin is full'); break; }
+          rv.rocks++; this.items.remove(held.id); this.sfx('clank');
+        } else if (!held && rv.rocks > 0) {
+          rv.rocks--; const r = this.items.spawn('rock', true, 0, 1.2, RV.zRear - 0.6); r.h = from; this.sfx('grab');
+        }
+        break;
+      case 'rearwin': rv.rearWin = !rv.rearWin; this.sfx('click'); break;
+      case 'radio_tune': rv.station = (rv.station + 1) % RADIO_STATIONS.length; rv.radio = true; this.sfx('click'); break;
       case 'door': rv.doorOpen = !rv.doorOpen; this.sfx('door'); break;
       case 'horn': this.aux.hornT = 0.45; this.honked(); break;
 
@@ -242,11 +277,56 @@ export class HostSim implements StopHost {
         if (id.startsWith('wheel_')) {
           const wi = Number(id.slice(6));
           if (cab.flat !== wi || Math.abs(rv.speed) > 0.5) break;
-          if (held?.k === 'tape' && held.d > 0) { this.useUp(held); cab.flat = -1; cab.nuts = 0; this.sfx('tape'); this.toast('🛞 Duct-taped the tire. What could go wrong?'); break; }
+          if (held?.k === 'tape' && held.d > 0) { this.useUp(held); cab.flat = -1; this.tireGrace = 90; cab.nuts = 0; this.sfx('tape'); this.toast('🛞 Duct-taped the tire. What could go wrong?'); break; }
           if (held?.k !== 'spare') break;
           cab.nuts++; this.sfx('clank');
-          if (cab.nuts >= 4) { cab.flat = -1; cab.nuts = 0; this.items.remove(held.id); this.toast('🛞 Spare tire on. Good as new-ish.'); }
+          if (cab.nuts >= 4) { cab.flat = -1; this.tireGrace = 90; cab.nuts = 0; this.items.remove(held.id); this.toast('🛞 Spare tire on. Good as new-ish.'); }
         }
+    }
+  }
+
+  /** Take a rock from a roadside pile. */
+  private rockPile(from: number, held: ItemState | undefined, i: number) {
+    const pile = chunkRocks(i);
+    if (!pile) return;
+    const hand = this.handOf(from);
+    if (hand && Math.hypot(hand[0] - pile.x, hand[2] - pile.z) > 7) return;
+    if (held) { this.toast('Hands full — drop it first'); return; }
+    const left = this.pileLeft.get(i) ?? PILE_ROCKS;
+    if (left <= 0) { this.toast('🪨 This pile is picked clean'); return; }
+    this.pileLeft.set(i, left - 1);
+    const r = this.items.spawn('rock', false, pile.x, 1, pile.z); r.h = from;
+    this.sfx('grab');
+  }
+
+  /** Thrown rocks: a gentle aim assist toward the cruiser, then a hit test in its frame. */
+  private stepRocks(dt: number) {
+    const cop = this.traffic.hittableCop();
+    if (!cop) return;
+    for (const it of [...this.s.items]) {
+      if (it.k !== 'rock' || it.rv || it.h !== -1 || it.s) continue;
+      const v = this.items.velOf(it.id);
+      if (!v) continue;
+      // work in the cruiser's frame: a rock only matters if it's moving fast relative to the car
+      const cvx = -Math.sin(cop.yaw) * cop.speed, cvz = -Math.cos(cop.yaw) * cop.speed;
+      let rvx = v[0] - cvx, rvz = v[2] - cvz;
+      const sp = Math.hypot(rvx, rvz);
+      if (sp < 6) continue;
+      const dx = cop.x - it.x, dz = cop.z - it.z, d = Math.hypot(dx, dz);
+      if (d < 60 && d > 1) {
+        const k = Math.min(1, dt * 3.5);
+        const nx = (rvx / sp) * (1 - k) + (dx / d) * k, nz = (rvz / sp) * (1 - k) + (dz / d) * k, nl = Math.hypot(nx, nz) || 1;
+        rvx = (nx / nl) * sp; rvz = (nz / nl) * sp;
+        v[0] = cvx + rvx; v[2] = cvz + rvz;
+      }
+      const rx = it.x - cop.x, rz = it.z - cop.z;
+      const along = rx * -Math.sin(cop.yaw) + rz * -Math.cos(cop.yaw), side = rx * Math.cos(cop.yaw) + rz * -Math.sin(cop.yaw);
+      const [hw, hl] = NPC_DIMS.cop;
+      if (Math.abs(side) < hw + 0.4 && Math.abs(along) < hl + 0.5 && it.y < 2.8) {
+        this.items.remove(it.id);
+        this.traffic.hitCop();
+        return;
+      }
     }
   }
 
@@ -283,7 +363,7 @@ export class HostSim implements StopHost {
     if (!held && target === this.s.seats.driver) {
       const c = this.crew(target);
       c.hypno = Math.max(0, c.hypno - 0.5);
-      this.sfx('slap');
+      this.sfx('slap'); this.emit({ t: 'ev', k: 'emote', who: from, what: 'slap' });
       this.toast(`👋 ${this.name(from)} slapped ${this.name(target)} awake`);
     }
   }
@@ -296,6 +376,7 @@ export class HostSim implements StopHost {
     if (food.caf) c.caf = Math.max(c.caf, food.caf);
     this.items.remove(it.id);
     this.emit({ t: 'ev', k: 'fed', to, stam: food.stam });
+    this.emit({ t: 'ev', k: 'emote', who: to, what: 'eat' });
     this.sfx('eat');
     const what = itemName(it.k, it.d);
     this.toast(from === to ? `${this.name(from)} ate a ${what}` : `${this.name(from)} fed ${this.name(to)} a ${what}`);
@@ -350,7 +431,7 @@ export class HostSim implements StopHost {
     const s = this.s, rv = s.rv;
     let changed = false;
     for (const f of FORKS) {
-      if (s.route[f.id] !== -1 || rv.z > forkZ(f) - 260) continue;
+      if (s.route[f.id] !== -1 || rv.z > forkZ(f) - 650) continue;
       const branchX = (k: number) => baseX(rv.z) + routeOffset(rv.z, (id) => (id === f.id ? k : chosen(id)));
       const pick = Math.abs(rv.x - branchX(0)) <= Math.abs(rv.x - branchX(1)) ? 0 : 1;
       s.route[f.id] = pick;
@@ -417,6 +498,7 @@ export class HostSim implements StopHost {
     this.t += dt;
     this.driveT += dt;
     this.hornCd = Math.max(0, this.hornCd - dt);
+    this.tireGrace = Math.max(0, this.tireGrace - dt);
     if (this.driveT > 0.5 || s.seats.driver === -1) this.drive = { th: 0, br: 0, st: 0, horn: false };
     const solo = Object.keys(s.crew).length <= 1 ? SURV.SOLO_EASE : 1;
 
@@ -466,7 +548,7 @@ export class HostSim implements StopHost {
           this.hitHazards.set(hz.id, this.t);
           const mag = Math.min(1.5, Math.abs(rv.speed) / 25);
           if (hz.type === 'pothole') { this.sfx('thump'); this.joltAll(mag); }
-          else if (cab.flat < 0) { cab.flat = wi; cab.nuts = 0; this.sfx('bang'); this.toast('🛞 BLOWOUT! Pull over and put the spare on'); this.joltAll(Math.min(mag, 0.6)); }
+          else if (cab.flat < 0 && this.tireGrace <= 0 && Math.random() < 0.6) { this.tireGrace = 90; cab.flat = wi; cab.nuts = 0; this.sfx('bang'); this.toast('🛞 BLOWOUT! Pull over and put the spare on'); this.joltAll(Math.min(mag, 0.6)); }
           break;
         }
       }
@@ -482,9 +564,11 @@ export class HostSim implements StopHost {
 
     // ---------- props ----------
     this.items.step(dt, accel);
+    this.stepRocks(dt);
     this.rusty.step(dt);
     this.traffic.step(dt);
     this.stops.step(dt);
+    this.groom.step(s, dt);
 
     // ---------- galley ----------
     const pan = s.items.find((i) => i.s === 'skillet');

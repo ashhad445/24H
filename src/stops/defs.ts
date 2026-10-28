@@ -1,6 +1,7 @@
 // The stops after Rusty's Oasis, built from kit parts. Stop-local coords: +X away from the road.
 import * as THREE from 'three';
-import { MAT, bean, type StopDef } from './kit';
+import { MAT, type StopDef } from './kit';
+import { makeNpc } from '../models/npcs';
 import { blackjack, grillJob, jukebox, roulette, slots } from './games';
 import { bed, building, decor, iceMachine, junkCars, lot, pawn, pumps, pylon, scrap, shop, table, vending } from './parts';
 
@@ -16,7 +17,7 @@ const canopy = (x0: number, x1: number, z0: number, z1: number, h: number, title
 // ------------------------------------------------------------------ Lucky Scorpion Diner (I-15)
 const DINER = { x0: 20, x1: 36, z0: -10, z1: 8 };
 const diner: StopDef = {
-  id: 'diner', name: 'Lucky Scorpion Diner', mile: 120, branch: { fork: 0, index: 0 },
+  id: 'diner', name: 'Lucky Scorpion Diner', mile: 240, branch: { fork: 0, index: 0 },
   lot: { x0: 5, x1: 50, z0: -30, z1: 30 },
   parts: [
     lot({ x0: 5, x1: 50, z0: -30, z1: 30 }),
@@ -40,7 +41,7 @@ const diner: StopDef = {
 const SHACK = { x0: 16, x1: 24, z0: -14, z1: -6 };
 const fence: [number, number, number, number][] = [[12, 12.2, -32, -6], [12, 12.2, 6, 32], [12, 58, -32.2, -32], [12, 58, 32, 32.2], [58, 58.2, -32, 32]];
 const junkyard: StopDef = {
-  id: 'junkyard', name: 'Canyon Junkyard', mile: 120, branch: { fork: 0, index: 1 },
+  id: 'junkyard', name: 'Canyon Junkyard', mile: 240, branch: { fork: 0, index: 1 },
   lot: { x0: 5, x1: 60, z0: -35, z1: 35 },
   parts: [
     lot({ x0: 5, x1: 60, z0: -35, z1: 35 }, true),
@@ -54,7 +55,7 @@ const junkyard: StopDef = {
     building({ id: 'shack', ...SHACK, h: 3.2, door: [-11, -9], wall: '#8d6e63', roof: '#4e342e', floor: '#6d4c41',
       sign: { lines: [['DUSTY\'S', 70, '#ffd54f'], ['WE BUY ANYTHING', 40, '#fff']], bg: '#3e2723', w: 4, h: 1 } }),
     pawn('pawn', [21.5, 0.9, -8.2], 'Dusty'),
-    decor('dusty', (v) => { const d = bean('#5d4037', '#a1887f'); d.position.set(22.8, 0, -8.2); d.rotation.y = Math.PI / 2; v.group.add(d); }),
+    decor('dusty', (v) => { const d = makeNpc('dusty'); d.position.set(22.8, 0, -8.2); d.rotation.y = Math.PI / 2; v.group.add(d); }),
     vending('soda', [15.6, -3], 'soda', 2, '#c62828', 'COLA'),
     junkCars('cars', [[30, -20, 0.3, '#5d4037'], [36, -18, -0.2, '#455a64'], [44, -22, 1.2, '#827717'], [30, 14, 0.1, '#4e342e'],
       [38, 18, 1.5, '#37474f'], [47, 10, -0.4, '#6d4c41'], [50, -6, 0.8, '#3e2723'], [26, 26, 1.1, '#5d4037']]),
@@ -68,7 +69,7 @@ const junkyard: StopDef = {
 const OFFICE = { x0: 14, x1: 22, z0: -22, z1: -14 };
 const ROOM6 = { x0: 27, x1: 35, z0: 0, z1: 6 };
 const motel: StopDef = {
-  id: 'motel', name: 'Roadside Motel', mile: 190, branch: { fork: 1, index: 0 },
+  id: 'motel', name: 'Roadside Motel', mile: 380, branch: { fork: 1, index: 0 },
   lot: { x0: 5, x1: 60, z0: -35, z1: 35 },
   parts: [
     lot({ x0: 5, x1: 60, z0: -35, z1: 35 }),
@@ -105,7 +106,7 @@ const motel: StopDef = {
 // ------------------------------------------------------------------ Rusty Cactus Casino (Cactus Strip)
 const CASINO = { x0: 18, x1: 44, z0: -18, z1: 18 };
 const casino: StopDef = {
-  id: 'casino', name: 'Rusty Cactus Casino', mile: 190, branch: { fork: 1, index: 1 },
+  id: 'casino', name: 'Rusty Cactus Casino', mile: 380, branch: { fork: 1, index: 1 },
   lot: { x0: 5, x1: 70, z0: -40, z1: 40 },
   parts: [
     lot({ x0: 5, x1: 70, z0: -40, z1: 40 }),
@@ -118,7 +119,7 @@ const casino: StopDef = {
     roulette('roulette', [31, -8], 10),
     blackjack('bj', [31, 9], 20),
     decor('bouncer', (v) => {
-      const b = bean('#212121'); b.scale.setScalar(1.25); b.position.set(16.6, 0, -3.6); b.rotation.y = Math.PI / 2; v.group.add(b);
+      const b = makeNpc('bouncer'); b.position.set(16.6, 0, -3.6); b.rotation.y = Math.PI / 2; v.group.add(b);
       const rope = new THREE.MeshStandardMaterial({ color: '#b71c1c' });
       for (const z of [-5, 5]) v.box(MAT.steel, 15.9, 16.1, 0, 1, z - 0.1, z + 0.1);
       v.box(rope, 15.95, 16.05, 0.8, 0.85, -5, -2.2);
@@ -137,7 +138,7 @@ const casino: StopDef = {
 // ------------------------------------------------------------------ Last Chance Gas (every route)
 const LCSTORE = { x0: 30, x1: 42, z0: -10, z1: 6 };
 const lastChance: StopDef = {
-  id: 'lastchance', name: 'Last Chance Gas', mile: 230,
+  id: 'lastchance', name: 'Last Chance Gas', mile: 460,
   lot: { x0: 5, x1: 55, z0: -30, z1: 30 },
   parts: [
     lot({ x0: 5, x1: 55, z0: -30, z1: 30 }),
@@ -147,7 +148,7 @@ const lastChance: StopDef = {
       sign: { lines: [['LAST CHANCE', 64, '#ffeb3b'], ['NEXT GAS: NEVER', 40, '#fff']], bg: '#b71c1c', w: 6, h: 1.2 } }),
     shop({ id: 'shop', clerkName: 'Earl', clerkColor: '#546e7a',
       products: [['patty', 5, 4], ['bun', 2.5, 4], ['cheese', 2, 3], ['coffee', 4, 3], ['energy', 6, 3], ['soda', 3, 3],
-        ['coolant', 18, 2], ['tape', 12, 2], ['fuse', 5, 2], ['spare', 90, 1]],
+        ['coolant', 18, 2], ['tape', 12, 2], ['fuse', 5, 2], ['spare', 90, 1], ['rocket', 85, 1]],
       shelves: [{ x0: 36.5, x1: 37.7, z0: -9, z1: -3.5, top: 1.0 }, { x0: 39, x1: 40.2, z0: -9, z1: -3.5, top: 1.0 }],
       checkout: { x0: 33, x1: 34, z0: 0.5, z1: 5, top: 1.05 }, register: [33.5, 1.05, 1.1], clerk: [35, 3], store: LCSTORE }),
     pawn('pawn', [40.5, 0.9, 3.8], 'Earl'),

@@ -93,7 +93,7 @@ Lose: clock hits 24:00 · RV destroyed · stranded (no fuel, no money) · arrive
 ## 7. Driving & Vehicle Systems
 | System | Spec |
 | :--- | :--- |
-| Transmission | `R N 1 2 3 4 5`. Top speeds R −16, 1:18, 2:34, 3:52, 4:70, 5:90 MPH. Lugging below band, redline above |
+| Transmission | `R N 1–7` (updated Phase 6: tops 30/56/84/114/146/178/208 MPH). Lugging below band, redline above |
 | RPM | 0 off, ~820 idle, ~6200 limit |
 | Ignition | Physical key; must be ON. Stalls if lugging hard in high gear at low speed |
 | Handbrake | Physical lever |
@@ -173,6 +173,7 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 | Driver seat | W / S | Throttle / brake |
 | | A / D | Steer |
 | | E ↑ · Q ↓ | Upshift / downshift (driver interacts with the mouse only) |
+| | N | Nitrous burst |
 | | Space | Handbrake toggle |
 | | H | Horn |
 | | Mouse + LMB | Click dash switches / key / shifter |
@@ -184,7 +185,7 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 Center reticle + context prompt · top‑left clock (countdown to 24:00), odometer, card balance (crimson if < $100 gift line, flashing if < $0), hazard badges · bottom‑left vitals + held item · bottom‑center key hints · top‑right toasts · Tab: room code & players.
 
 ## 17. Audio
-Procedural Web Audio first (engine RPM loop, horn, clicks, cash chime, sizzle, siren). Real audio files later. Radio stations. 3D proximity voice (WebRTC, Phase 7), muffled through RV walls.
+Procedural Web Audio (engine, road, ambience, SFX) + procedural radio stations (Phase 6). Real audio files later. 3D proximity voice (WebRTC, Phase 7), muffled through RV walls.
 
 ## 18. Multiplayer Architecture
 - **Relay server** (`server/relay.ts`, Node `ws`): rooms keyed by 4‑letter code, max 4 peers, first peer = host. Pure relay — no game logic.
@@ -293,11 +294,32 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] **Last Chance Gas** (every route, mile 230): $4/gal pumps, Earl's overpriced store, pawn crate
 - Dev: `game.tp(mile, [forkA, forkB])` teleports (host). Test: `npx tsx scripts/sim-stops.ts`
 - Dev (`?dev`): F9 Rusty's · F10 next fork · F8 chapel · F7 sandstorm · F6 jump to 22:00. Tests: `sim-phase5.ts`, `sim-parked.ts`
-### Phase 6 — Audio, radio, juice
+### Phase 6 — Audio, radio, juice  ← **built, needs human playtest**
+- [x] Dash radio (`audio/Radio.ts`): power knob + tune knob, dial needle. 4 stations of procedurally generated, seeded songs — **KCAC 98.1 Cactus Country** (boom-chick, twang), **SURF 66.6 Reverb Rock** (tremolo lead, slapback), **MIRAGE 103.5 Smooth Lounge** (walking bass, pads, vibes), **KDST AM 1220 Desert Talk** (DJ Desert Dale: ads, weather, scanner news, reads the groom's texts). Tune in mid-song; DJ bumpers between songs
+- [x] Radio voice = Web Speech API + on-screen captions. Reception: static in sandstorms / Devil's Canyon, AM better at night; muffled + quieter when you walk away from the RV
+- [x] Groom texts (`net/Groom.ts`, host): Kevin texts on a timeline (escalating panic) + reactions (low balance, overdraft, cops, wreck, fire, storm, fork choices, almost there). Phone pop-ups + buzz, last texts on Tab
+- [x] Sound: tire hum, gravel off-road, wind rush at speed, brake squeal, backfires, crash crunch; vehicle muffled from outside; positional stop/Rusty SFX (distance + stereo pan); crickets + coyotes at night, birds by day
+- [x] Juice: speed FOV (+9° at 100 mph), speed vignette, cabin rumble (engine / road / gravel / flat), gear-shift camera kick, red damage flash, animated balance with flying +$/−$ chips, toast + text pop-in animations
+- [x] **Model polish pass**: `models/Character.ts` (one procedural builder: bean + human, faces w/ blinking, arms/hands, hats, walk/sit/hold/eat/slap/wave animations, talk mouth) · `models/npcs.ts` cast (Cletus, Roscoe, Flo, Earl, Dusty, bouncer) · `rv/RVPolish.ts` (textured wood/vinyl/carpet, curtains, window trim, rounded roof rails, fender arcs, mirrors, plate; dents / rust / cracked windshield by integrity; flat tire shows rim) · traffic rebuilt from side-profile extrusions (sedan, pickup, camper, **semi** (new), cop, shark) with drivers, rolling wheels, brake lights, turn signals, hazards · item meshes (sesame burgers, extinguisher w/ gauge+hose, hammer, tape, jugs, cans, map, jerrycan)
+- [x] RV acceleration raised ~65% (0–60 ≈ 7.5 s, top speed still ~104 mph)
+- Dev: `game.dummy(id, pose)` spawns a fake crewmate
+- [x] **Speed rework**: 6-lane highway (3 each way), speed limit **120 mph** (radar tickets above 127), **7-speed gearbox** (R N 1–7, tops 30/56/84/114/146/178/208 mph, ~198 mph real top, 0–60 ≈ 6 s), speedometer to 240. Route doubled to **500 base miles** (forks at 200 / 340, stops at 100 / 240 / 380 / 460; branch deltas ×2) so a run still takes about an hour; forks stretch (1500 m split, lock 650 m past), traffic 40–70 m/s with 3-lane overtaking + longer sight lines, chasers up to ~210 mph. Stop frames sit beside the wider road
+- [x] **Tires**: blowouts only from rare tire debris (2% of chunks), 60% chance per hit, plus a 90 s no-blowout grace after any flat or repair; potholes ~40% rarer
+- [x] **Side mirrors**: live left/right mirror views beside the cab windows (rear-view mirror far plane fixed too). **Skull charm** hangs from the driver's mirror with pendulum physics (swings with accel/turns, streams back at speed) — rub it (E/click) for a random dark quote
+- [x] **Radio podcast** — 5th station *VOID 91.3, The Void Cast*: Mortimer Graves + Pip trade very dark comedy bits (some react to storms, cops, the loan shark, night, groom texts)
+- Fix: raycasts skip hidden objects (Roscoe's prompt no longer appears at the window when he's off-duty)
+- [x] **Item physics**: real Coulomb friction (items stay put until pushed harder than their grip, carpet slicker than counters/dirt; hard landings shed sideways speed) so thrown items no longer skate across counters, plus soft item-item separation so loose props never pile up on one spot (`ItemPhysics.separate`)
+- [x] **Speed cameras**: the limit (120) is only enforced by cameras now. Overhead gantries (`World.chunkRadar`, every 8 chunks, spans the road, red lenses) with yellow "SPEED CAMERA AHEAD 500/250 m" signs and a HUD countdown banner within 1400 m (turns red above the limit). Over 127 mph at a gantry = white flash + shutter sound + 1 heat. Everywhere else: floor it
+- [x] **Radio hiss** quieted (baseline ~7× lower; only storms / canyon / tuning sweeps bring it up)
+- [x] **Nitrous (NOS)**: blue tank on the dash with 3 charge lights, starts full (3 shots). Driver presses **N**: 5 s burn (+7 m/s², rev limiter lifted 25%, blue flame at the exhaust, FOV/blue vignette/rumble, 🔥 on the gear panel). Refill by pouring **Rocket fuel** (item `rocket`: $55 at Rusty's, $85 at Last Chance Gas) into the tank. Tunables: `NOS` in `config.ts`
+- [x] **Rear-view mirror charm**: a tiny coffin (`charm2`, 20 dark-joke quotes in `CHARM2_QUOTES`) with the same pendulum physics as the skull
+- [x] **Rocks**: roadside rock piles every other chunk (`World.chunkRocks`, 6 rocks each, view in `world/RockPiles.ts`, host tracks what's left). Pick up one at a time (E), stash them in the **rock bin** by the rear window (12 max; E to store / take out), open the **rear window hatch** (click the latch) and throw with RMB (32 m/s, light aim assist). 3 hits wreck Roscoe's cruiser: chase over, heat cleared, wreck towed after 14 s (`TrafficSim.hitCop`). Test: `npx tsx scripts/sim-phase7.ts`
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑10‑29 — Phase 6 built**: radio, groom texts, road/ambient audio, juice.
+
 **2026‑10‑29 — Phase 5 complete**: all five new stops built on the stop kit.
 
 **2026‑10‑29 — Phase 5 core built** (forks, map, night, sandstorms, chapel ending, 4-lane highway, traffic rewrite, volume menu).

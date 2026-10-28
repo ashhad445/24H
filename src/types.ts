@@ -16,6 +16,13 @@ export interface RVState {
   wipers: boolean;
   dome: boolean;
   radio: boolean;
+  station: number; // index into RADIO_STATIONS
+  charm: number; // index into CHARM_QUOTES (the skull on the mirror)
+  charm2: number; // index into CHARM2_QUOTES (the coffin on the rear-view mirror)
+  nos: number; // nitrous charges left
+  nosT: number; // seconds of nitrous burn left
+  rocks: number; // rocks stashed in the rock bin
+  rearWin: boolean; // rear window hatch open
   doorOpen: boolean;
   horn: boolean;
   steam: boolean;
@@ -68,7 +75,7 @@ export interface RustyState {
 /** NPC vehicle (traffic, Sheriff Roscoe, the Loan Shark). World space. */
 export interface NPCState {
   id: number;
-  k: 'sedan' | 'pickup' | 'camper' | 'cop' | 'shark';
+  k: 'sedan' | 'pickup' | 'camper' | 'semi' | 'cop' | 'shark';
   x: number; z: number; yaw: number;
   speed: number;
   c: number; // paint color index (traffic)
@@ -115,6 +122,8 @@ export type GameMsg =
   | { t: 'act'; id: string; btn: number }
   | { t: 'drop'; inRV: boolean; p: [number, number, number]; v: [number, number, number] }
   | { t: 'ev'; k: 'toast'; text: string }
-  | { t: 'ev'; k: 'sfx'; name: string }
+  | { t: 'ev'; k: 'sfx'; name: string; at?: [number, number, number] }
+  | { t: 'ev'; k: 'text'; from: string; text: string }
+  | { t: 'ev'; k: 'emote'; who: number; what: 'slap' | 'eat' | 'wave' }
   | { t: 'ev'; k: 'jolt'; mag: number }
   | { t: 'ev'; k: 'fed'; to: number; stam: number };

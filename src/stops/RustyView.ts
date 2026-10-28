@@ -1,5 +1,6 @@
 // Client-side meshes, interactables and animation for Rusty's Oasis.
 import * as THREE from 'three';
+import { makeNpc } from '../models/npcs';
 import type { PromptCtx } from '../rv/RV';
 import type { SharedState } from '../types';
 import {
@@ -260,16 +261,7 @@ export class RustyView {
 
   private buildCletus() {
     const c = this.cletus;
-    const overalls = new THREE.MeshStandardMaterial({ color: '#3f5a8a', roughness: 0.8 });
-    const skin = new THREE.MeshStandardMaterial({ color: '#e0ac69', roughness: 0.8 });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.33, 0.8, 6, 14), overalls); body.position.y = 0.75; body.castShadow = true;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 12), skin); head.position.y = 1.62;
-    const beard = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), this.M.white); beard.scale.set(1, 1.1, 0.7); beard.position.set(0, 1.45, -0.12);
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.22, 14), new THREE.MeshStandardMaterial({ color: '#6d4c41' })); hat.position.y = 1.9;
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.03, 18), new THREE.MeshStandardMaterial({ color: '#6d4c41' })); brim.position.y = 1.8;
-    const eyeM = new THREE.MeshStandardMaterial({ color: '#111' });
-    for (const s of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), eyeM); e.position.set(s * 0.09, 1.68, -0.23); c.add(e); }
-    c.add(body, head, beard, hat, brim);
+    c.add(makeNpc('cletus'));
     // shotgun leaning on the counter
     const gun = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.0, 0.06), this.M.wood);
     gun.position.set(COUNTER.x1 + 0.12, 0.5, COUNTER.z1 - 0.2); gun.rotation.z = 0.25; this.group.add(gun);

@@ -21,6 +21,10 @@ export class Player {
   private tired = false;
   private bob = 0;
   private shake = 0;
+  private kickP = 0;
+  private kickV = 0;
+  /** 0..~1.5 continuous cabin vibration (set each frame by main). */
+  rumble = 0;
   /** Static buildings to collide with when outside the RV. */
   statics: StaticSet[] = [];
 
@@ -184,10 +188,21 @@ export class Player {
 
   private placeCamera(eye: number, bob: number) {
     this.shake = Math.max(0, this.shake - 0.016 * 3);
+    // gear-shift kick: a damped spring on pitch
+    this.kickV += (-this.kickP * 140 - this.kickV * 14) * 0.016;
+    this.kickP += this.kickV * 0.016;
     const sh = this.shake * 0.06;
-    this.camera.position.set(this.pos.x + (Math.random() - 0.5) * sh, this.pos.y + eye + bob + (Math.random() - 0.5) * sh, this.pos.z);
-    this.camera.rotation.set(this.pitch + (Math.random() - 0.5) * sh * 0.5, this.yaw, (Math.random() - 0.5) * sh * 0.3, 'YXZ');
+    // road + engine rumble: a smooth high-frequency wobble rather than random jitter
+    const t = performance.now() / 1000;
+    const rb = this.inRV ? this.rumble : 0;
+    const ry = (Math.sin(t * 61) * 0.6 + Math.sin(t * 37.3) * 0.4) * rb * 0.004;
+    const rr = Math.sin(t * 23.1) * rb * 0.0015;
+    this.camera.position.set(this.pos.x + (Math.random() - 0.5) * sh, this.pos.y + eye + bob + ry + (Math.random() - 0.5) * sh, this.pos.z);
+    this.camera.rotation.set(this.pitch + this.kickP + (Math.random() - 0.5) * sh * 0.5, this.yaw, rr + (Math.random() - 0.5) * sh * 0.3, 'YXZ');
   }
+
+  /** Camera pitch nudge (gear change, brake slam). + = look down. */
+  kick(amount: number) { this.kickV -= amount * 12; }
 
   /** Pothole / crash: bounce the player if they're standing in the RV, shake everyone inside. */
   jolt(mag: number) {

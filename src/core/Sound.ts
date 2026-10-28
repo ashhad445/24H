@@ -1,4 +1,17 @@
-// Procedural Web Audio SFX. Real samples replace these in Phase 6.
+// Procedural Web Audio: vehicle loops, road + ambience, one-shot SFX (optionally positional), the radio.
+import { Radio, type TalkCtx } from '../audio/Radio';
+
+/** Everything the per-frame mix needs. */
+export interface AudioFrame {
+  dt: number;
+  rpm: number; running: boolean; load: number; horn: boolean;
+  speed: number; // m/s (abs)
+  brake: number; offroad: boolean; doorOpen: boolean;
+  sizzle: number; flames: number; siren: number; wind: number;
+  inRV: boolean; rvDist: number; // listener distance from the RV (m)
+  night: number; // 0 day … 1 night
+  radio: { on: boolean; station: number; signal: number; talk: TalkCtx };
+}
 
 export interface Volumes { master: number; vehicle: number; effects: number; radio: number }
 export const DEFAULT_VOLUMES: Volumes = { master: 0.8, vehicle: 0.8, effects: 0.9, radio: 0.7 };
@@ -18,10 +31,24 @@ export class Sound {
   private engGain!: GainNode;
   private hornGain!: GainNode;
   private noiseBuf!: AudioBuffer;
-  private radioGain!: GainNode;
   private sizzleGain!: GainNode;
   private fireGain!: GainNode;
   private sirenGain!: GainNode;
+  private roadGain!: GainNode;
+  private roadF!: BiquadFilterNode;
+  private gravelGain!: GainNode;
+  private airGain!: GainNode;
+  private squealGain!: GainNode;
+  private exterior!: BiquadFilterNode; // muffles the vehicle when you're outside / far away
+  private dest!: AudioNode; // where one-shots go (sfxBus, or a positional chain)
+  radio: Radio | null = null;
+  private lastThrottle = 0;
+  private lastRpm = 0;
+  private ambT = 0;
+  private listener = { x: 0, y: 0, z: 0, rx: 1, rz: 0 };
+  /** Radio speech captions (HUD). */
+  onCaption: (who: string, text: string) => void = () => {};
+  private voice: SpeechSynthesisVoice | null = null;
 
   /** Must be called from a user gesture. */
   init() {
@@ -54,7 +81,9 @@ export class Sound {
     const g2 = ctx.createGain(); g2.gain.value = 0.4;
     this.engOsc1.connect(this.engFilter);
     this.engOsc2.connect(g2).connect(this.engFilter);
-    this.engFilter.connect(this.engGain).connect(this.vehicleBus);
+    this.exterior = ctx.createBiquadFilter(); this.exterior.type = 'lowpass'; this.exterior.frequency.value = 20000;
+    this.exterior.connect(this.vehicleBus);
+    this.engFilter.connect(this.engGain).connect(this.exterior);
     this.engOsc1.start(); this.engOsc2.start();
 
     // horn: two detuned squares
@@ -66,14 +95,30 @@ export class Sound {
       o.connect(hf); o.start();
     }
     hf.connect(this.hornGain).connect(this.vehicleBus);
+    this.dest = this.sfxBus;
 
-    // radio static bed
-    this.radioGain = ctx.createGain();
-    this.radioGain.gain.value = 0;
-    const rn = ctx.createBufferSource(); rn.buffer = this.noiseBuf; rn.loop = true;
-    const rf = ctx.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 1500; rf.Q.value = 0.7;
-    rn.connect(rf).connect(this.radioGain).connect(this.radioBus);
-    rn.start();
+    // the radio
+    this.radio = new Radio(ctx, this.radioBus, this.noiseBuf);
+    this.radio.onSay = (text, who, vol) => this.say(text, who, vol);
+    this.radio.onStop = () => { try { speechSynthesis.cancel(); } catch { /* no speech */ } };
+    this.radio.isSpeaking = () => { try { return speechSynthesis.speaking; } catch { return false; } };
+    this.pickVoice();
+
+    // tires on asphalt, gravel off-road, wind rush, brake squeal
+    const loop = (rate: number) => { const n = ctx.createBufferSource(); n.buffer = this.noiseBuf; n.loop = true; n.playbackRate.value = rate; n.start(); return n; };
+    this.roadF = ctx.createBiquadFilter(); this.roadF.type = 'lowpass'; this.roadF.frequency.value = 300;
+    this.roadGain = ctx.createGain(); this.roadGain.gain.value = 0;
+    loop(0.6).connect(this.roadF).connect(this.roadGain).connect(this.exterior);
+    const gf = ctx.createBiquadFilter(); gf.type = 'bandpass'; gf.frequency.value = 1400; gf.Q.value = 0.8;
+    this.gravelGain = ctx.createGain(); this.gravelGain.gain.value = 0;
+    loop(0.8).connect(gf).connect(this.gravelGain).connect(this.exterior);
+    const af = ctx.createBiquadFilter(); af.type = 'bandpass'; af.frequency.value = 800; af.Q.value = 0.4;
+    this.airGain = ctx.createGain(); this.airGain.gain.value = 0;
+    loop(1).connect(af).connect(this.airGain).connect(this.exterior);
+    this.squealGain = ctx.createGain(); this.squealGain.gain.value = 0;
+    const sq = ctx.createOscillator(); sq.type = 'triangle'; sq.frequency.value = 2350;
+    const vib = ctx.createOscillator(); vib.frequency.value = 7; const vg = ctx.createGain(); vg.gain.value = 40;
+    vib.connect(vg).connect(sq.frequency); sq.connect(this.squealGain).connect(this.exterior); sq.start(); vib.start();
 
     // sizzle + fire loops
     this.sizzleGain = ctx.createGain(); this.sizzleGain.gain.value = 0;
@@ -113,24 +158,118 @@ export class Sound {
     this.radioBus.gain.setTargetAtTime(this.vol.radio ** 2, t, 0.03);
   }
 
-  update(rpm: number, running: boolean, load: number, horn: boolean, radio: boolean, sizzle = 0, flames = 0, siren = 0, wind = 0) {
+  /** Listener pose for positional one-shots (world position + right vector). */
+  setListener(x: number, y: number, z: number, rx: number, rz: number) { this.listener = { x, y, z, rx, rz }; }
+
+  update(f: AudioFrame) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const { rpm, running, load } = f;
+    // outside, the RV is a muffled thing over there
+    const near = f.inRV ? 1 : 1 / (1 + Math.max(0, f.rvDist - 3) / 9);
+    const muff = f.inRV ? (f.doorOpen ? 9000 : 5200) : 2400 * near + 400;
+    this.exterior.frequency.setTargetAtTime(muff, t, 0.1);
     const fire = Math.max(rpm, 1) / 30; // 4-cyl firing frequency
     this.engOsc1.frequency.setTargetAtTime(fire, t, 0.05);
     this.engOsc2.frequency.setTargetAtTime(fire * 0.5, t, 0.05);
     this.engFilter.frequency.setTargetAtTime(250 + rpm * 0.25 + load * 600, t, 0.05);
-    this.engGain.gain.setTargetAtTime(running ? 0.12 + load * 0.12 : 0, t, 0.08);
-    this.hornGain.gain.setTargetAtTime(horn ? 0.14 : 0, t, 0.015);
-    this.radioGain.gain.setTargetAtTime(radio ? 0.025 : 0, t, 0.1);
-    this.sizzleGain.gain.setTargetAtTime(sizzle * 0.05, t, 0.2);
-    this.fireGain.gain.setTargetAtTime(flames * 0.35, t, 0.2);
-    this.sirenGain.gain.setTargetAtTime(siren * 0.07, t, 0.2);
-    this.windGain.gain.setTargetAtTime(wind * 0.5, t, 0.4);
+    this.engGain.gain.setTargetAtTime(running ? (0.12 + load * 0.12) * near : 0, t, 0.08);
+    this.hornGain.gain.setTargetAtTime(f.horn ? 0.14 * Math.max(near, 0.35) : 0, t, 0.015);
+    const sp = Math.min(1, f.speed / 90);
+    this.roadGain.gain.setTargetAtTime((f.offroad ? 0.1 : 0.22) * sp * near, t, 0.15);
+    this.roadF.frequency.setTargetAtTime(180 + sp * 650, t, 0.2);
+    this.gravelGain.gain.setTargetAtTime(f.offroad ? Math.min(1, f.speed / 20) * 0.28 * near * (0.7 + 0.3 * Math.random()) : 0, t, 0.05);
+    this.airGain.gain.setTargetAtTime(sp * sp * (f.doorOpen || !f.inRV ? 0.3 : 0.09) * near, t, 0.2);
+    this.squealGain.gain.setTargetAtTime(f.brake > 0.7 && f.speed > 2 && f.speed < 16 ? 0.025 * near : 0, t, 0.05);
+    this.sizzleGain.gain.setTargetAtTime(f.sizzle * 0.05, t, 0.2);
+    this.fireGain.gain.setTargetAtTime(f.flames * 0.35, t, 0.2);
+    this.sirenGain.gain.setTargetAtTime(f.siren * 0.07, t, 0.2);
+    this.windGain.gain.setTargetAtTime(f.wind * 0.5, t, 0.4);
+
+    // backfire: lifting off the throttle at high rpm, or a big rev jump on a downshift
+    if (running && this.lastThrottle > 0.6 && load < 0.15 && rpm > 3600 && Math.random() < 0.55) this.backfire(near);
+    else if (running && this.lastRpm > 0 && rpm - this.lastRpm > 1500 && Math.random() < 0.5) this.backfire(near);
+    this.lastThrottle = load; this.lastRpm = rpm;
+
+    // desert ambience: crickets + coyotes at night, the odd bird by day
+    this.ambT -= f.dt;
+    if (this.ambT <= 0) {
+      this.ambT = 0.12 + Math.random() * 0.25;
+      const amb = f.inRV ? (f.doorOpen ? 0.5 : 0.18) : 1;
+      if (f.night > 0.5 && Math.random() < 0.55) this.cricket(amb * 0.05 * f.night);
+      if (f.night > 0.5 && Math.random() < 0.003) this.coyote(amb * 0.07);
+      if (f.night < 0.3 && Math.random() < 0.02) this.bird(amb * 0.04);
+    }
+
+    // radio: it lives in the dash, so walking away makes it quieter and muffled
+    const r = f.radio;
+    this.radio?.update({
+      on: r.on, station: r.station, signal: r.signal, talk: r.talk,
+      level: f.inRV ? 1 : Math.max(0, 1 - f.rvDist / (f.doorOpen ? 35 : 18)) * (f.doorOpen ? 0.8 : 0.45),
+      muffle: f.inRV ? 0 : f.doorOpen ? 0.55 : 0.9,
+    });
   }
 
-  play(name: string) {
+  private pickVoice() {
+    try {
+      const choose = () => {
+        const vs = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
+        this.voice = vs.find((v) => /david|guy|daniel|male|fred|alex/i.test(v.name)) ?? vs[0] ?? null;
+      };
+      choose();
+      speechSynthesis.addEventListener('voiceschanged', choose);
+    } catch { /* no speech synthesis */ }
+  }
+
+  /** The radio talks: Web Speech (if available) + a HUD caption. */
+  private say(text: string, who: string, level: number) {
+    if (level < 0.12) return;
+    this.onCaption(who, text);
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.volume = Math.min(1, this.vol.master ** 2 * this.vol.radio ** 2 * level * 1.2);
+      if (u.volume < 0.02) return;
+      u.rate = who === 'Pip' ? 1.18 : 1.05;
+      u.pitch = who === 'Desert Dale' ? 0.75 : who === 'Mortimer Graves' ? 0.55 : who === 'Pip' ? 1.45 : 1.0;
+      if (this.voice) u.voice = this.voice;
+      speechSynthesis.speak(u);
+    } catch { /* no speech synthesis */ }
+  }
+
+  private backfire(level: number) {
+    const v = 0.55 * Math.max(level, 0.3);
+    const n = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) { const d = i * (0.07 + Math.random() * 0.06); this.noiseBurst(0.09, 250, v, d, 'lowpass'); this.tone(110, 50, 0.08, 'square', v * 0.4, d); }
+  }
+  private cricket(v: number) {
+    const f = 4100 + Math.random() * 500;
+    for (let i = 0; i < 3; i++) this.tone(f, f, 0.025, 'sine', v, i * 0.045);
+  }
+  private coyote(v: number) {
+    this.tone(500, 1100, 0.6, 'triangle', v); this.tone(1100, 700, 0.9, 'triangle', v, 0.55);
+    this.tone(520, 1150, 0.5, 'triangle', v * 0.5, 1.6); this.tone(1150, 650, 0.8, 'triangle', v * 0.5, 2.05);
+  }
+  private bird(v: number) {
+    this.tone(2600, 3400, 0.12, 'sine', v); this.tone(3400, 2400, 0.16, 'sine', v, 0.14);
+  }
+
+  /** One-shot. With `at` (world position) it's quieter with distance and panned. */
+  play(name: string, at?: [number, number, number]) {
     if (!this.ctx) return;
+    if (at) {
+      const L = this.listener;
+      const dx = at[0] - L.x, dz = at[2] - L.z, d = Math.hypot(dx, dz);
+      if (d > 150) return;
+      const g = this.ctx.createGain(); g.gain.value = 1 / (1 + Math.max(0, d - 12) / 12);
+      const p = this.ctx.createStereoPanner(); p.pan.value = d > 0.5 ? Math.max(-0.8, Math.min(0.8, (dx * L.rx + dz * L.rz) / d)) : 0;
+      g.connect(p).connect(this.sfxBus);
+      this.dest = g;
+      setTimeout(() => { g.disconnect(); p.disconnect(); }, 6000);
+    }
+    try { this.oneShot(name); } finally { this.dest = this.sfxBus; }
+  }
+
+  private oneShot(name: string) {
     switch (name) {
       case 'click': this.noiseBurst(0.03, 3000, 0.25); break;
       case 'ratchet': for (let i = 0; i < 4; i++) this.noiseBurst(0.02, 2500, 0.2, i * 0.05); break;
@@ -154,6 +293,7 @@ export class Sound {
       case 'whoosh': this.noiseBurst(0.7, 500, 0.7, 0, 'lowpass'); break;
       case 'sizzle': this.noiseBurst(0.5, 4000, 0.3, 0, 'highpass'); break;
       case 'honk': this.tone(420, 420, 0.35, 'square', 0.08); this.tone(520, 520, 0.35, 'square', 0.08); break;
+      case 'nos': this.tone(160, 1100, 1.6, 'sawtooth', 0.28); this.noiseBurst(4.6, 2600, 0.5, 0, 'highpass'); this.noiseBurst(0.4, 300, 0.9, 0, 'lowpass'); break;
       case 'camera': this.noiseBurst(0.05, 5000, 0.4); this.tone(2000, 2000, 0.08, 'sine', 0.15, 0.06); break;
       case 'bullhorn': this.tone(180, 220, 0.25, 'sawtooth', 0.25); this.tone(220, 160, 0.4, 'sawtooth', 0.25, 0.28); break;
       case 'jukebox': {
@@ -164,6 +304,8 @@ export class Sound {
       case 'scrub': for (let i = 0; i < 3; i++) this.noiseBurst(0.09, 1800, 0.25, i * 0.1); break;
       case 'yell': this.tone(320, 520, 0.18, 'sawtooth', 0.25); this.tone(520, 260, 0.35, 'sawtooth', 0.25, 0.18); break;
       case 'bell': for (let i = 0; i < 3; i++) this.tone(1568, 1568, 0.3, 'sine', 0.2, i * 0.15); break;
+      case 'buzz': for (let i = 0; i < 2; i++) this.tone(180, 175, 0.18, 'square', 0.08, i * 0.26); this.tone(1320, 1320, 0.08, 'sine', 0.1, 0.55); break;
+      case 'crunch': this.noiseBurst(0.35, 900, 0.7); this.noiseBurst(0.25, 2800, 0.35, 0.04, 'highpass'); this.tone(90, 45, 0.3, 'sine', 0.6); break;
       case 'jackpot': for (let i = 0; i < 8; i++) this.tone(880 + i * 110, 880 + i * 110, 0.12, 'square', 0.12, i * 0.09); break;
     }
   }
@@ -176,7 +318,7 @@ export class Sound {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    src.connect(f).connect(g).connect(this.sfxBus);
+    src.connect(f).connect(g).connect(this.dest);
     src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
   }
 
@@ -189,7 +331,7 @@ export class Sound {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(this.sfxBus);
+    o.connect(g).connect(this.dest);
     o.start(t); o.stop(t + dur + 0.05);
   }
 }

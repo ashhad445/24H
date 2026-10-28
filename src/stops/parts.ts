@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { itemName } from '../items/Items';
 import type { Box2 } from '../rv/RV';
 import type { ItemState } from '../types';
-import { MAT, bean, canvasTex, signTexture, type Component, type HostCtx } from './kit';
+import { MAT, canvasTex, signTexture, type Component, type HostCtx } from './kit';
+import { makeNpc } from '../models/npcs';
 
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 const rectBox = (r: Rect, top?: number): Box2 => ({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, top });
@@ -187,10 +188,10 @@ export function shop(o: ShopOpts): Component {
       scr.position.set(-0.12, 0.3, 0); scr.rotation.z = 0.3; reg.add(body, scr);
       reg.position.set(...o.register); v.group.add(reg);
       v.reg('register', reg, (_st, c) => (c.held === 'card' ? 'Pay for everything on the counter' : `${o.clerkName}'s register — bring the card (items on the counter)`));
-      clerkView = bean(o.clerkColor, '#6d4c41');
+      clerkView = makeNpc(o.clerkName.toLowerCase(), { body: o.clerkColor });
       clerkView.position.set(o.clerk[0], 0, o.clerk[1]);
       paper = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.35), new THREE.MeshStandardMaterial({ color: '#eee', side: THREE.DoubleSide }));
-      paper.position.set(0, 1.3, -0.35); clerkView.add(paper);
+      paper.position.set(0, 1.25, -0.42); paper.rotation.x = -0.4; clerkView.add(paper);
       v.group.add(clerkView);
       v.reg('clerk', clerkView, (st) => (st.watch ? `${o.clerkName.toUpperCase()}: "Can I help ya?"` : `${o.clerkName} is reading a magazine…`));
     },

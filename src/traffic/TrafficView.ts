@@ -1,92 +1,172 @@
 // Client rendering of NPC vehicles, Roscoe on foot, flashing lights and the siren.
 import * as THREE from 'three';
+import { makeNpc } from '../models/npcs';
 import type { RVModel } from '../rv/RV';
+import { NPC_DIMS } from './TrafficSim';
 import type { NPCState, SharedState } from '../types';
 
 const PAINT = ['#e53935', '#1e88e5', '#fdd835', '#43a047', '#f5f5f5', '#8e24aa'];
 
-interface View { g: THREE.Group; k: NPCState['k']; red?: THREE.MeshStandardMaterial; blue?: THREE.MeshStandardMaterial; heads: THREE.MeshStandardMaterial; flash?: THREE.PointLight }
+interface View {
+  g: THREE.Group; k: NPCState['k'];
+  red?: THREE.MeshStandardMaterial; blue?: THREE.MeshStandardMaterial; heads: THREE.MeshStandardMaterial; flash?: THREE.PointLight;
+  tail: THREE.MeshStandardMaterial; sigL: THREE.MeshStandardMaterial; sigR: THREE.MeshStandardMaterial;
+  wheels: THREE.Object3D[]; wheelR: number; lastSpeed: number; brakeT: number; sigT: number;
+}
 
 const tire = new THREE.MeshStandardMaterial({ color: '#151515', roughness: 0.9 });
-const glass = new THREE.MeshStandardMaterial({ color: '#7fa7b8', roughness: 0.1, metalness: 0.4 });
+const hub = new THREE.MeshStandardMaterial({ color: '#b8bcc0', roughness: 0.3, metalness: 0.85 });
+const glass = new THREE.MeshStandardMaterial({ color: '#5f8794', roughness: 0.08, metalness: 0.5 });
 const chrome = new THREE.MeshStandardMaterial({ color: '#d0d4d8', roughness: 0.3, metalness: 0.9 });
 const black = new THREE.MeshStandardMaterial({ color: '#0d0d0f', roughness: 0.75 });
+const skinM = new THREE.MeshStandardMaterial({ color: '#d9a066', roughness: 0.8 });
 
-function box(g: THREE.Group, mat: THREE.Material, w: number, h: number, l: number, x: number, y: number, z: number) {
+function box(g: THREE.Object3D, mat: THREE.Material, w: number, h: number, l: number, x: number, y: number, z: number) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m;
+}
+
+/** Extrude a side profile [z, y] (front = −z) across the width, with softened edges. */
+function prof(g: THREE.Object3D, mat: THREE.Material, pts: [number, number][], w: number, bevel = 0.07, x = 0) {
+  const shape = new THREE.Shape();
+  pts.forEach(([z, y], i) => (i ? shape.lineTo(-z, y) : shape.moveTo(-z, y)));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.02, w - bevel * 2), bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, steps: 1 });
+  geo.translate(0, 0, -Math.max(0.02, w - bevel * 2) / 2);
+  geo.rotateY(Math.PI / 2);
+  const m = new THREE.Mesh(geo, mat); m.position.x = x; m.castShadow = true; m.receiveShadow = true; g.add(m);
+  return m;
+}
+
+function wheel(v: View, g: THREE.Object3D, r: number, x: number, z: number, wide = 0.26) {
+  const w = new THREE.Group(); w.position.set(x, r, z);
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(r, r, wide, 16).rotateZ(Math.PI / 2), tire); t.castShadow = true;
+  const h = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, wide + 0.02, 10).rotateZ(Math.PI / 2), hub);
+  const nub = new THREE.Mesh(new THREE.BoxGeometry(wide + 0.04, r * 0.14, r * 0.7), black); // so rolling is visible
+  w.add(t, h, nub); g.add(w); v.wheels.push(w);
+}
+
+/** A person at the wheel, seen through the glass. */
+function driver(g: THREE.Object3D, x: number, y: number, z: number, hat?: string) {
+  const d = new THREE.Group(); d.position.set(x, y, z);
+  d.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.25, 4, 8), new THREE.MeshStandardMaterial({ color: '#546e7a' })));
+  const h = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), skinM); h.position.y = 0.4; d.add(h);
+  if (hat) { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.1, 10), new THREE.MeshStandardMaterial({ color: hat })); c.position.y = 0.55; d.add(c); }
+  g.add(d);
 }
 
 /** Vehicle facing −Z (like the RV). */
 function buildVehicle(k: NPCState['k'], c: number): View {
   const g = new THREE.Group();
   const heads = new THREE.MeshStandardMaterial({ color: '#fffbe6', emissive: '#fff3c0', emissiveIntensity: 0.2 });
-  const tail = new THREE.MeshStandardMaterial({ color: '#7a0000', emissive: '#ff1a1a', emissiveIntensity: 0.5 });
-  const view: View = { g, k, heads };
-  const paint = new THREE.MeshStandardMaterial({ color: k === 'cop' ? '#f5f5f5' : k === 'shark' ? '#18181b' : PAINT[c % PAINT.length], roughness: k === 'shark' ? 0.85 : 0.4, metalness: k === 'shark' ? 0.1 : 0.3 });
-  const dims: Record<NPCState['k'], [number, number, number]> = { sedan: [1.8, 4.4, 0.7], pickup: [2.0, 5.0, 0.85], camper: [2.3, 6.0, 0.9], cop: [1.9, 4.8, 0.72], shark: [1.9, 4.6, 0.6] };
-  const [w, l, bodyH] = dims[k];
-  const base = 0.32;
-  box(g, paint, w, bodyH, l, 0, base + bodyH / 2, 0);
-  if (k === 'pickup') {
-    box(g, paint, w * 0.95, 0.7, l * 0.38, 0, base + bodyH + 0.35, -l * 0.12);
-    box(g, glass, w * 0.96, 0.45, l * 0.36, 0, base + bodyH + 0.4, -l * 0.12);
-    box(g, black, w * 0.9, 0.05, l * 0.4, 0, base + bodyH + 0.02, l * 0.27); // bed
+  const tail = new THREE.MeshStandardMaterial({ color: '#7a0000', emissive: '#ff1a1a', emissiveIntensity: 0.35 });
+  const sigL = new THREE.MeshStandardMaterial({ color: '#8a5a00', emissive: '#ffa000', emissiveIntensity: 0 });
+  const sigR = sigL.clone();
+  const view: View = { g, k, heads, tail, sigL, sigR, wheels: [], wheelR: 0.34, lastSpeed: 0, brakeT: 0, sigT: 0 };
+  const paintC = k === 'cop' ? '#f5f5f5' : k === 'shark' ? '#18181b' : PAINT[c % PAINT.length];
+  const paint = new THREE.MeshStandardMaterial({ color: paintC, roughness: k === 'shark' ? 0.85 : 0.35, metalness: k === 'shark' ? 0.1 : 0.35 });
+  const [hw, hl] = NPC_DIMS[k];
+  const w = hw * 2, l = hl * 2, f = -hl, b = hl; // front / back z
+  const lights = (y: number, inset = 0.3) => {
+    for (const s of [-1, 1]) {
+      box(g, heads, 0.3, 0.13, 0.05, s * (hw - inset), y, f - 0.01);
+      box(g, tail, 0.32, 0.12, 0.05, s * (hw - inset + 0.03), y, b + 0.01);
+      box(g, s < 0 ? sigL : sigR, 0.14, 0.09, 0.05, s * (hw - 0.12), y - 0.02, f - 0.01);
+      box(g, s < 0 ? sigL : sigR, 0.14, 0.09, 0.05, s * (hw - 0.1), y - 0.17, b + 0.01);
+    }
+  };
+
+  if (k === 'sedan' || k === 'cop') {
+    // rounded sedan: sloped hood, glasshouse, short trunk
+    prof(g, paint, [[f, 0.38], [f, 0.74], [f + 0.9, 0.88], [f + 1.5, 0.92], [b - 0.9, 0.92], [b, 0.82], [b, 0.38]], w);
+    prof(g, glass, [[f + 1.55, 0.9], [f + 2.2, 1.42], [b - 1.5, 1.42], [b - 0.95, 0.9]], w * 0.9, 0.04);
+    prof(g, paint, [[f + 2.15, 1.4], [f + 2.3, 1.5], [b - 1.6, 1.5], [b - 1.45, 1.4]], w * 0.88, 0.04); // roof
+    driver(g, -hw * 0.5, 0.95, f + 2.5, k === 'cop' ? '#5d4037' : undefined);
+    if (k === 'sedan' && c % 3 === 0) driver(g, hw * 0.5, 0.95, f + 2.5);
+    box(g, chrome, w + 0.05, 0.14, 0.12, 0, 0.45, f - 0.02);
+    box(g, chrome, w + 0.05, 0.14, 0.12, 0, 0.45, b + 0.02);
+    lights(0.7);
+  } else if (k === 'pickup') {
+    prof(g, paint, [[f, 0.4], [f, 0.95], [f + 0.8, 1.05], [f + 2.2, 1.1], [f + 2.2, 0.4]], w); // hood + cab base
+    prof(g, paint, [[f + 2.0, 1.0], [f + 2.2, 1.0], [f + 2.2, 1.85], [f + 3.0, 1.85], [f + 3.3, 1.05], [f + 3.3, 1.0]], w * 0.95, 0.06); // cab
+    prof(g, glass, [[f + 2.4, 1.1], [f + 2.45, 1.75], [f + 2.9, 1.75], [f + 3.15, 1.1]], w * 0.97, 0.03);
+    // bed: floor + sides + tailgate
+    box(g, black, w * 0.9, 0.06, 1.9, 0, 0.8, b - 1.0);
+    for (const s of [-1, 1]) prof(g, paint, [[b - 2.0, 0.4], [b - 2.0, 1.15], [b, 1.15], [b, 0.4]], 0.14, 0.03, s * (hw - 0.07));
+    box(g, paint, w * 0.95, 0.75, 0.1, 0, 0.78, b - 0.04);
+    driver(g, -hw * 0.45, 1.1, f + 2.9, '#a1887f');
+    box(g, chrome, w + 0.05, 0.16, 0.14, 0, 0.5, f - 0.03);
+    box(g, chrome, w + 0.05, 0.14, 0.12, 0, 0.5, b + 0.03);
+    lights(0.82);
   } else if (k === 'camper') {
-    box(g, new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.7 }), w, 1.5, l * 0.72, 0, base + bodyH + 0.75, l * 0.12);
-    box(g, glass, w * 0.96, 0.5, l * 0.18, 0, base + bodyH + 0.3, -l * 0.33);
-    box(g, paint, w + 0.02, 0.18, l * 0.72, 0, base + bodyH + 0.6, l * 0.12);
+    const cream = new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.7 });
+    prof(g, cream, [[f, 0.45], [f, 1.5], [f + 0.5, 2.0], [f + 1.7, 2.1], [f + 1.7, 3.3], [b, 3.3], [b, 0.45]], w); // cab nose + box
+    prof(g, paint, [[f + 0.1, 1.0], [f + 0.1, 1.3], [b, 1.3], [b, 1.0]], w + 0.04, 0.02); // stripe
+    prof(g, glass, [[f + 0.55, 1.55], [f + 0.8, 2.0], [f + 1.65, 2.0], [f + 1.65, 1.55]], w * 0.92, 0.03);
+    for (const s of [-1, 1]) for (const z of [-0.2, 1.6]) box(g, glass, 0.03, 0.6, 0.9, s * (hw + 0.02), 2.2, z - 0.3);
+    box(g, new THREE.MeshStandardMaterial({ color: '#cfd8dc' }), 0.9, 0.22, 0.9, 0, 3.4, 0.4); // roof AC
+    box(g, chrome, 0.08, 1.8, 0.05, hw * 0.7, 1.9, b + 0.05); // ladder
+    driver(g, -hw * 0.5, 1.25, f + 1.2, '#ffd54f');
+    box(g, chrome, w + 0.05, 0.16, 0.14, 0, 0.55, f - 0.02);
+    box(g, chrome, w + 0.05, 0.16, 0.14, 0, 0.55, b + 0.02);
+    lights(0.85);
+  } else if (k === 'semi') {
+    const trailer = new THREE.MeshStandardMaterial({ color: '#e8eaed', roughness: 0.6 });
+    // tractor: long hood, sleeper cab
+    prof(g, paint, [[f, 0.55], [f, 1.5], [f + 1.6, 1.6], [f + 1.6, 3.0], [f + 2.9, 3.0], [f + 2.9, 0.55]], w);
+    box(g, glass, w * 0.96, 0.9, 0.04, 0, 2.3, f + 1.62); // windshield
+    box(g, black, w * 0.6, 0.3, 0.04, 0, 1.0, f - 0.02); // grille
+    for (const s of [-1, 1]) {
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.6, 8), chrome); stack.position.set(s * (hw + 0.1), 2.0, f + 2.0); g.add(stack);
+    }
+    // trailer
+    const tl = hl * 2 - 3.0;
+    box(g, trailer, w + 0.1, 2.9, tl, 0, 2.25, f + 3.0 + tl / 2);
+    for (let i = 0; i < 9; i++) box(g, trailer, w + 0.16, 2.9, 0.06, 0, 2.25, f + 3.2 + i * 0.62);
+    box(g, paint, w + 0.12, 0.35, tl, 0, 1.25, f + 3.0 + tl / 2);
+    driver(g, -hw * 0.45, 1.85, f + 2.3, '#c62828');
+    box(g, chrome, w + 0.1, 0.2, 0.2, 0, 0.65, f - 0.05);
+    lights(1.0, 0.35);
   } else {
-    const cabL = k === 'shark' ? l * 0.38 : l * 0.48;
-    box(g, paint, w * 0.88, 0.55, cabL, 0, base + bodyH + 0.27, k === 'shark' ? 0.25 : 0.1);
-    box(g, glass, w * 0.9, 0.38, cabL * 0.96, 0, base + bodyH + 0.3, k === 'shark' ? 0.25 : 0.1);
+    // loan shark muscle car: low, long hood, short cabin
+    prof(g, paint, [[f, 0.36], [f, 0.62], [f + 1.2, 0.78], [f + 2.6, 0.82], [b - 0.5, 0.78], [b, 0.7], [b, 0.36]], w);
+    prof(g, glass, [[f + 2.6, 0.8], [f + 3.1, 1.2], [b - 1.0, 1.2], [b - 0.5, 0.8]], w * 0.88, 0.03);
+    prof(g, black, [[f + 3.05, 1.18], [f + 3.15, 1.26], [b - 1.05, 1.26], [b - 0.95, 1.18]], w * 0.86, 0.03);
+    box(g, new THREE.MeshStandardMaterial({ color: '#b71c1c', roughness: 0.6 }), 0.25, 0.01, l * 0.98, 0, 0.83, 0);
+    box(g, black, 0.5, 0.18, 0.7, 0, 0.88, f + 1.0); // hood scoop
+    for (let i = -3; i <= 3; i++) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.3, 6).rotateX(-Math.PI / 2), chrome);
+      spike.position.set(i * 0.25, 0.45, f - 0.2); g.add(spike);
+    }
+    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5, 3), new THREE.MeshStandardMaterial({ color: '#455a64' }));
+    fin.position.set(0, 1.55, 0.5); fin.scale.set(0.3, 1, 1.4); g.add(fin);
+    box(g, black, w + 0.05, 0.14, 0.12, 0, 0.42, f - 0.02);
+    lights(0.62);
   }
-  for (const [x, z] of [[w / 2, l * 0.32], [-w / 2, l * 0.32], [w / 2, -l * 0.32], [-w / 2, -l * 0.32]]) {
-    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.26, 14).rotateZ(Math.PI / 2), tire); t.position.set(x, 0.34, z); g.add(t);
-  }
-  for (const s of [-1, 1]) {
-    box(g, heads, 0.32, 0.14, 0.04, s * (w / 2 - 0.3), base + bodyH * 0.6, -l / 2 - 0.01);
-    box(g, tail, 0.3, 0.12, 0.04, s * (w / 2 - 0.25), base + bodyH * 0.6, l / 2 + 0.01);
-  }
-  box(g, k === 'shark' ? black : chrome, w + 0.05, 0.14, 0.12, 0, base + 0.08, -l / 2 - 0.02);
+
+  // wheels
+  const wr = k === 'semi' ? 0.5 : k === 'camper' ? 0.4 : 0.34;
+  view.wheelR = wr;
+  const axles = k === 'semi' ? [f + 1.0, b - 1.8, b - 0.7] : [f + l * 0.2, b - l * 0.2];
+  for (const z of axles) for (const s of [-1, 1]) wheel(view, g, wr, s * (hw - 0.05), z, k === 'semi' ? 0.36 : 0.26);
+  // wheel arches
+  if (k !== 'semi') for (const z of axles) for (const s of [-1, 1]) box(g, black, 0.06, wr * 1.5, wr * 2.6, s * (hw + 0.01), wr * 1.15, z);
+
   if (k === 'cop') {
-    box(g, black, w + 0.02, 0.32, l * 0.5, 0, base + bodyH * 0.55, 0.1); // two-tone doors
+    box(g, black, w + 0.02, 0.32, l * 0.45, 0, 0.62, 0.1); // two-tone doors
     const star = new THREE.Mesh(new THREE.CircleGeometry(0.18, 5), new THREE.MeshStandardMaterial({ color: '#d4a017', metalness: 0.8, roughness: 0.3 }));
-    for (const s of [-1, 1]) { const st = star.clone(); st.position.set(s * (w / 2 + 0.02), base + bodyH * 0.55, 0.1); st.rotation.y = s * Math.PI / 2; g.add(st); }
+    for (const s of [-1, 1]) { const st = star.clone(); st.position.set(s * (hw + 0.02), 0.62, 0.1); st.rotation.y = s * Math.PI / 2; g.add(st); }
     view.red = new THREE.MeshStandardMaterial({ color: '#600', emissive: '#ff1a1a', emissiveIntensity: 0 });
     view.blue = new THREE.MeshStandardMaterial({ color: '#006', emissive: '#2962ff', emissiveIntensity: 0 });
-    const roofY = base + bodyH + 0.6;
+    const roofY = 1.55;
     box(g, black, w * 0.7, 0.08, 0.3, 0, roofY, 0.1);
     box(g, view.red, w * 0.32, 0.14, 0.26, -w * 0.18, roofY + 0.1, 0.1);
     box(g, view.blue, w * 0.32, 0.14, 0.26, w * 0.18, roofY + 0.1, 0.1);
     view.flash = new THREE.PointLight('#ff1a1a', 0, 22, 1.2); view.flash.position.set(0, roofY + 0.5, 0.1); g.add(view.flash);
   }
-  if (k === 'shark') {
-    // red racing stripes, hood scoop and a bumper full of spikes
-    box(g, new THREE.MeshStandardMaterial({ color: '#b71c1c', roughness: 0.6 }), 0.25, 0.01, l * 0.98, 0, base + bodyH + 0.005, 0);
-    box(g, black, 0.5, 0.18, 0.7, 0, base + bodyH + 0.1, -l * 0.25);
-    for (let i = -3; i <= 3; i++) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.3, 6).rotateX(-Math.PI / 2), chrome);
-      spike.position.set(i * 0.25, base + 0.1, -l / 2 - 0.2); g.add(spike);
-    }
-    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5, 3), new THREE.MeshStandardMaterial({ color: '#455a64' }));
-    fin.position.set(0, base + bodyH + 0.85, 0.5); fin.scale.set(0.3, 1, 1.4); g.add(fin);
-  }
   return view;
 }
 
 function buildRoscoe() {
-  const g = new THREE.Group();
-  const uniform = new THREE.MeshStandardMaterial({ color: '#c8b27a', roughness: 0.8 });
-  const skin = new THREE.MeshStandardMaterial({ color: '#d9a066', roughness: 0.8 });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.85, 6, 14), uniform); body.position.y = 0.78; body.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 12), skin); head.position.y = 1.68;
-  const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.22, 14), new THREE.MeshStandardMaterial({ color: '#5d4037' })); hat.position.y = 1.95;
-  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.03, 18), new THREE.MeshStandardMaterial({ color: '#5d4037' })); brim.position.y = 1.86;
-  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.05), black); shades.position.set(0, 1.72, -0.23);
-  const mustache = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: '#3e2723' })); mustache.position.set(0, 1.6, -0.24);
-  const badge = new THREE.Mesh(new THREE.CircleGeometry(0.07, 5), new THREE.MeshStandardMaterial({ color: '#d4a017', metalness: 0.8, roughness: 0.3 })); badge.position.set(-0.14, 1.15, -0.33);
-  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.02), new THREE.MeshStandardMaterial({ color: '#fafafa' })); pad.position.set(0.3, 1.05, -0.3); pad.rotation.x = -0.5;
-  g.add(body, head, hat, brim, shades, mustache, badge, pad);
+  const g = makeNpc('roscoe');
   g.traverse((o) => { o.userData.iid = 'roscoe'; });
   return g;
 }
@@ -120,6 +200,17 @@ export class TrafficView {
       v.g.rotation.y += dy * k;
       v.g.rotation.z = n.w > 0 ? 0.06 : 0; // wrecked cars sag
       v.heads.emissiveIntensity = daylight < 0.5 ? 2.2 : 0.2;
+      // wheels roll; brake lights on when slowing; turn signals while changing lanes
+      for (const wh of v.wheels) wh.rotation.x -= (n.speed * dt) / v.wheelR;
+      v.brakeT = n.speed < v.lastSpeed - 0.08 ? 0.35 : Math.max(0, v.brakeT - dt);
+      v.lastSpeed = n.speed;
+      v.tail.emissiveIntensity = (daylight < 0.5 ? 0.9 : 0.35) + (v.brakeT > 0 || n.w > 0 ? 2.2 : 0);
+      const turning = Math.abs(dy) > 0.012 && n.w === 0;
+      v.sigT = turning ? v.sigT + dt : 0;
+      const blink = turning && Math.floor(v.sigT * 3) % 2 === 0 ? 2.5 : 0;
+      const hazard = n.w > 0 && Math.floor(t * 2.5) % 2 === 0 ? 2.5 : 0;
+      v.sigL.emissiveIntensity = dy > 0 ? Math.max(blink, hazard) : hazard;
+      v.sigR.emissiveIntensity = dy < 0 ? Math.max(blink, hazard) : hazard;
       if (n.k === 'cop' && v.red && v.blue && v.flash) {
         const on = s.cop.phase > 0 && s.cop.phase < 4;
         const phase = Math.floor(t * 4) % 2 === 0;

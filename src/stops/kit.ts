@@ -7,7 +7,7 @@ import type { ItemSim } from '../items/ItemPhysics';
 import type { Box2, PromptCtx } from '../rv/RV';
 import type { ItemState, SharedState } from '../types';
 import { FORKS } from '../world/Route';
-import { roadPoint, roadYaw } from '../world/World';
+import { ROAD_HALF, roadPoint, roadYaw } from '../world/World';
 import { fromSetLocal, toSetLocal, type StaticSet } from './geom';
 
 /** What host-side component logic can use. */
@@ -15,7 +15,7 @@ export interface HostCtx {
   s: SharedState;
   items: ItemSim;
   toast(text: string): void;
-  sfx(name: string): void;
+  sfx(name: string, at?: [number, number, number]): void;
   name(id: number): string;
   held(id: number): ItemState | undefined;
   itemWorld(it: ItemState): [number, number, number] | null;
@@ -73,7 +73,7 @@ export function stopOnRoute(def: StopDef, route: number[]) {
 /** The stop's frame. Only valid once every fork before it is decided. */
 export function stopFrame(def: StopDef): StaticSet {
   const z0 = -def.mile * M;
-  const [x, z] = roadPoint(z0, def.side ?? 5);
+  const [x, z] = roadPoint(z0, def.side ?? ROAD_HALF - 2.45);
   const boxes = def.parts.flatMap((p) => p.colliders?.() ?? []);
   return { x, z, yaw: roadYaw(z0), boxes };
 }
@@ -84,7 +84,7 @@ export function makeHostCtx(base: Omit<HostCtx, 'set' | 'stopId' | 'world' | 'lo
     get s() { return base.s; },
     items: base.items,
     toast: (t) => base.toast(t),
-    sfx: (n) => base.sfx(n),
+    sfx: (n, at) => base.sfx(n, at ?? [set.x, 1.5, set.z]), // positional: from the stop
     name: (id) => base.name(id),
     held: (id) => base.held(id),
     itemWorld: (it) => base.itemWorld(it),

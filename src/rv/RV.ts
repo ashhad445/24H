@@ -1,8 +1,10 @@
 // Procedural 1980s Class-C RV: hull, interior, clickable dash, gauges, wheels, lights.
 // root = untilted transform (x, z, yaw). body = child that pitches/rolls; everything visual hangs off body.
 import * as THREE from 'three';
-import { CFG, RV, WHEELBASE, gearInfo } from '../config';
+import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
+import { RVPolish } from './RVPolish';
+import { CHARM2_QUOTES, CHARM_QUOTES } from './charmQuotes';
 
 export interface PromptCtx { held: string; cab: CabinState }
 export interface Interactable { id: string; obj: THREE.Object3D; prompt: (s: RVState, c: PromptCtx) => string }
@@ -70,7 +72,7 @@ export class RVModel {
   readonly mirror: THREE.Mesh;
   readonly mirrorAnchor = new THREE.Object3D();
 
-  private wheels: { g: THREE.Group; spin: THREE.Group; front: boolean }[] = [];
+  private wheels: { g: THREE.Group; spin: THREE.Group; front: boolean; rim: THREE.Mesh }[] = [];
   private steeringWheel = new THREE.Group();
   private needles: Record<'speed' | 'tach' | 'fuel' | 'temp', THREE.Object3D> = {} as any;
   private ledTex: THREE.CanvasTexture;
@@ -96,7 +98,17 @@ export class RVModel {
   private fireGroup!: THREE.Group;
   private fireLight!: THREE.PointLight;
   private brewLamp!: THREE.MeshStandardMaterial;
+  private rearHatch = new THREE.Group();
+  private nosLeds: THREE.MeshStandardMaterial[] = [];
+  private nosFlame = new THREE.Group();
+  private nosLight!: THREE.PointLight;
+  private binRocks: THREE.Mesh[] = [];
   private lastSpeed = 0;
+  private polish!: RVPolish;
+  /** Side-mirror glass + camera mounts, for main.ts to render live views into. */
+  sideMirrors!: RVPolish;
+  private radioNeedle!: THREE.Mesh;
+  private radioKnob!: THREE.Mesh;
   private pitch = 0;
   private roll = 0;
   /** smoothed RV-local acceleration (x lateral, z longitudinal) for cabin jolts */
@@ -147,7 +159,12 @@ export class RVModel {
     // rear wall: u = x, v = y
     const rearHoles: Rect[] = [[-0.7, 0.7, 1.6, 2.3]];
     for (const r of wallRects(-halfW, halfW, floorY, ceilY, rearHoles)) this.box(M.cream, r[0], r[1], r[2], r[3], zRear - wallT, zRear, true);
-    this.glass(0, 1.95, zRear - wallT / 2, 'z', 1.4, 0.7);
+    // rear window: a hatch hinged at the top that swings out (rocks fly out of it)
+    this.rearHatch.position.set(0, 2.3, zRear - wallT / 2);
+    const hatchGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.7), M.glass); hatchGlass.position.y = -0.35; hatchGlass.renderOrder = 2;
+    const latch = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.06, 0.05), M.chrome); latch.position.set(0, -0.67, -0.03);
+    this.rearHatch.add(hatchGlass, latch); this.body.add(this.rearHatch);
+    this.reg('rearwin', latch, (s, c) => (s.rearWin ? 'Close the rear window' : c.held === 'rock' ? 'Open the rear window (then throw rocks out with RMB)' : 'Open the rear window'));
     // front: windshield frame
     this.box(M.cream, -halfW, -1.22, 1.4, ceilY, zFront - 0.06, zFront, true);
     this.box(M.cream, 1.22, halfW, 1.4, ceilY, zFront - 0.06, zFront, true);
@@ -239,7 +256,9 @@ export class RVModel {
         const nut = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.08, 0.3), M.dark); spin.add(nut);
         this.root.add(g); // wheels don't tilt with the body
         const wi = this.wheels.length;
-        this.wheels.push({ g, spin, front });
+        const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.37, 12).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#8a4b2a', roughness: 0.6, metalness: 0.7 }));
+        rim.visible = false; spin.add(rim);
+        this.wheels.push({ g, spin, front, rim });
         this.reg(`wheel_${wi}`, g, (s, c) => (c.cab.flat !== wi ? '' : c.held !== 'spare' && c.held !== 'tape' ? 'Flat tire! Spare is on the back (or duct tape)' : Math.abs(s.speed) > 0.5 ? 'Stop the RV first!' : c.held === 'tape' ? 'Duct-tape the tire' : `Bolt on spare (${c.cab.nuts}/4)`));
       }
     }
@@ -305,7 +324,7 @@ export class RVModel {
       cap.position.z = 0.003; pivot.add(cap);
       this.body.add(pivot); this.needles[key] = pivot;
     };
-    gauge('speed', -0.83, 1.45, 0.1, gaugeFace('MPH', ['0', '20', '40', '60', '80', '100', '120']));
+    gauge('speed', -0.83, 1.45, 0.1, gaugeFace('MPH', ['0', '40', '80', '120', '160', '200', '240']));
     gauge('tach', -0.57, 1.45, 0.1, gaugeFace('RPM x1000', ['0', '1', '2', '3', '4', '5', '6'], 0.88));
     gauge('fuel', -1.03, 1.38, 0.06, gaugeFace('FUEL', ['E', '½', 'F']));
     gauge('temp', -0.37, 1.38, 0.06, gaugeFace('°F', ['100', '180', '260'], 0.84));
@@ -338,8 +357,14 @@ export class RVModel {
     const radio = this.box(M.black, 0.0, 0.34, 1.08, 1.26, -2.67, -2.64);
     const dial = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.05), new THREE.MeshBasicMaterial({ color: '#ffb74d' }));
     dial.position.set(0.12, 1.19, -2.637); this.body.add(dial);
-    for (const kx of [0.04, 0.3]) { const k = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 10).rotateX(Math.PI / 2), M.chrome); k.position.set(kx, 1.15, -2.63); this.body.add(k); }
-    this.reg('radio', radio, (s) => `Radio: ${s.radio ? 'ON (static…)' : 'OFF'}`);
+    this.radioNeedle = new THREE.Mesh(new THREE.PlaneGeometry(0.006, 0.046), new THREE.MeshBasicMaterial({ color: '#d32f2f' }));
+    this.radioNeedle.position.set(0.06, 1.19, -2.635); this.body.add(this.radioNeedle);
+    const st = (s: RVState) => { const r = RADIO_STATIONS[s.station] ?? RADIO_STATIONS[0]; return `${r.call} ${r.freq} · ${r.tag}`; };
+    const knobs = [0.04, 0.3].map((kx) => { const k = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.035, 10).rotateX(Math.PI / 2), M.chrome); k.position.set(kx, 1.15, -2.628); this.body.add(k); return k; });
+    this.radioKnob = knobs[1];
+    const power = (s: RVState) => (s.radio ? `Radio OFF (${st(s)})` : 'Radio ON');
+    this.reg('radio', radio, power); this.reg('radio', knobs[0], power);
+    this.reg('radio_tune', knobs[1], (s) => `Tune → ${st({ ...s, station: (s.station + 1) % RADIO_STATIONS.length })}`);
     // card tray (Phase 3)
     this.box(M.dark, 0.45, 0.85, 1.43, 1.46, -2.95, -2.7);
 
@@ -448,6 +473,60 @@ export class RVModel {
     }
     this.steam.visible = false;
     this.body.add(this.steam);
+    // ---------- nitrous tank (on the dash) ----------
+    {
+      const tank = new THREE.Group(); tank.position.set(0.17, 1.5, -2.8);
+      const blue = new THREE.MeshStandardMaterial({ color: '#1e88e5', metalness: 0.6, roughness: 0.3 });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.3, 16).rotateZ(Math.PI / 2), blue); body.castShadow = true;
+      const capL = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 8), blue); capL.position.x = -0.15;
+      const capR = capL.clone(); capR.position.x = 0.15;
+      const valve = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.05, 8), M.chrome); valve.position.set(0.06, 0.07, 0);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), M.red); knob.position.set(0.06, 0.1, 0);
+      const band1 = new THREE.Mesh(new THREE.CylinderGeometry(0.054, 0.054, 0.02, 16).rotateZ(Math.PI / 2), M.chrome); band1.position.x = -0.08;
+      const band2 = band1.clone(); band2.position.x = 0.08;
+      tank.add(body, capL, capR, valve, knob, band1, band2);
+      this.body.add(tank);
+      this.reg('nos_tank', tank, (s, c) => (c.held === 'rocket' ? 'Pour rocket fuel into the nitrous tank' : `NITROUS ${s.nos}/3 — driver presses N`));
+      // charge lights on a little bar in front
+      this.box(M.black, 0.04, 0.3, 1.43, 1.47, -2.7, -2.66);
+      for (let i = 0; i < 3; i++) {
+        const mat = new THREE.MeshStandardMaterial({ color: '#0d2b45', emissive: '#29b6f6', emissiveIntensity: 0 });
+        const led = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 6), mat); led.position.set(0.1 + i * 0.07, 1.47, -2.68); this.body.add(led);
+        this.nosLeds.push(mat);
+      }
+      // exhaust tip + the blue flame it spits when the nitrous burns
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.3, 12).rotateX(Math.PI / 2), M.chrome); pipe.position.set(-0.95, 0.5, zRear + 0.16); this.body.add(pipe);
+      const core = new THREE.Mesh(new THREE.ConeGeometry(0.07, 1.6, 10).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#7fd6ff', transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }));
+      core.position.z = 0.8;
+      const outer = new THREE.Mesh(new THREE.ConeGeometry(0.13, 2.6, 10).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#2979ff', transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending }));
+      outer.position.z = 1.3;
+      this.nosFlame.add(core, outer); this.nosFlame.position.set(-0.95, 0.5, zRear + 0.3); this.nosFlame.visible = false;
+      this.nosLight = new THREE.PointLight('#4fc3f7', 0, 10, 1.5); this.nosLight.position.set(0, 0, 0.8); this.nosFlame.add(this.nosLight);
+      this.body.add(this.nosFlame);
+    }
+
+    // ---------- rock bin (rear, by the window) ----------
+    {
+      const binMat = new THREE.MeshStandardMaterial({ color: '#4e342e', roughness: 0.9 });
+      const id = 'rockbin';
+      const prompt = (s: RVState, c: PromptCtx) => (c.held === 'rock' ? `Store the rock (${s.rocks}/12)` : c.held ? '' : s.rocks > 0 ? `Take a rock (${s.rocks} stored)` : 'Rock bin (empty) — pick up rocks by the road');
+      const bx0 = -0.5, bx1 = -0.05, bz0 = 2.82, bz1 = 3.24, by1 = floorY + 0.32;
+      for (const [x0, x1, y0, y1, z0, z1] of [[bx0, bx1, floorY, floorY + 0.03, bz0, bz1], [bx0, bx0 + 0.03, floorY, by1, bz0, bz1], [bx1 - 0.03, bx1, floorY, by1, bz0, bz1], [bx0, bx1, floorY, by1, bz0, bz0 + 0.03], [bx0, bx1, floorY, by1, bz1 - 0.03, bz1]]) {
+        const m = this.box(binMat, x0, x1, y0, y1, z0, z1, true); this.reg(id, m, prompt);
+      }
+      const rockMat = new THREE.MeshStandardMaterial({ color: '#8a8176', roughness: 1 });
+      for (let i = 0; i < 12; i++) {
+        const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.07, 0), rockMat);
+        m.position.set(bx0 + 0.09 + (i % 4) * 0.087, floorY + 0.09 + Math.floor(i / 8) * 0.08, bz0 + 0.1 + (Math.floor(i / 4) % 2) * 0.17);
+        m.rotation.set(i, i * 2, 0); m.visible = false; this.body.add(m); this.binRocks.push(m); this.reg(id, m, prompt);
+      }
+      this.colliders.push({ x0: bx0 - 0.02, x1: bx1 + 0.02, z0: bz0 - 0.02, z1: bz1 + 0.02, top: by1 });
+    }
+
+    this.polish = new RVPolish(this.body, this.M);
+    this.sideMirrors = this.polish;
+    this.reg('charm', this.polish.charmHit, (s) => `💀 "${CHARM_QUOTES[s.charm] ?? ''}"  — rub for another`);
+    this.reg('charm2', this.polish.charm2Hit, (s) => `⚰️ "${CHARM2_QUOTES[s.charm2] ?? ''}"  — rub for another`);
   }
 
   private box(mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, cast = false, receive = true) {
@@ -475,6 +554,20 @@ export class RVModel {
 
   update(s: RVState, cab: CabinState, dt: number) {
     const power = !cab.fuseOut;
+    this.polish.update(s.integrity, cab.fire);
+    this.polish.step(Math.min(dt, 0.05), this.accelLocal, Math.abs(s.speed));
+    this.rearHatch.rotation.x += ((s.rearWin ? -1.15 : 0) - this.rearHatch.rotation.x) * Math.min(1, dt * 8);
+    this.binRocks.forEach((m, i) => { m.visible = i < s.rocks; });
+    this.nosLeds.forEach((m, i) => { m.emissiveIntensity = i < s.nos ? (s.nosT > 0 && i === s.nos ? 2.5 : 1.6) : s.nosT > 0 && i === s.nos ? 2.5 * (0.5 + 0.5 * Math.sin(performance.now() * 0.03)) : 0; });
+    this.nosFlame.visible = s.nosT > 0;
+    if (s.nosT > 0) {
+      const f = 0.8 + Math.random() * 0.4;
+      this.nosFlame.scale.set(1, 1, f * Math.min(1, s.nosT * 2));
+      this.nosLight.intensity = 8 * f;
+    }
+    const nx = 0.06 + (s.station / (RADIO_STATIONS.length - 1)) * 0.12;
+    this.radioNeedle.position.x += (nx - this.radioNeedle.position.x) * Math.min(1, dt * 8);
+    this.radioKnob.rotation.z = -s.station * 1.3;
     this.root.position.set(s.x, 0, s.z);
     this.root.rotation.y = s.yaw;
 
@@ -499,7 +592,9 @@ export class RVModel {
       w.spin.rotation.x -= (s.speed * dt) / RV.wheelR;
       if (w.front) w.g.rotation.y = s.steer;
       const flat = cab.flat === i;
-      w.spin.scale.set(1, flat ? 0.82 : 1, flat ? 0.82 : 1);
+      w.spin.scale.set(1, flat ? 0.78 : 1, flat ? 0.78 : 1);
+      w.rim.visible = flat;
+      if (flat) w.g.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.12; else w.g.rotation.z = 0;
       w.g.position.y = RV.wheelR * (flat ? 0.82 : 1);
     });
     if (cab.flat >= 0) this.body.rotation.z += cab.flat % 2 === 0 ? 0.025 : -0.025;
@@ -509,7 +604,7 @@ export class RVModel {
     const setNeedle = (key: keyof RVModel['needles'], f: number) => {
       this.needles[key].rotation.z = 2.356 - THREE.MathUtils.clamp(f, 0, 1) * 4.712;
     };
-    setNeedle('speed', power ? (Math.abs(s.speed) * CFG.MPH) / 120 : 0);
+    setNeedle('speed', power ? (Math.abs(s.speed) * CFG.MPH) / 240 : 0);
     setNeedle('tach', power ? s.rpm / 6500 : 0);
     setNeedle('fuel', power && s.ignition === 2 ? s.fuel / CFG.FUEL_CAPACITY : 0);
     setNeedle('temp', power ? (s.temp - 100) / 160 : 0);
@@ -527,7 +622,7 @@ export class RVModel {
 
     // key / shifter / handbrake / switches
     this.key.rotation.z = s.ignition === 0 ? 0 : s.ignition === 1 ? -1.2 : -0.8;
-    const H: Record<number, [number, number]> = { [-1]: [-1, 1], 0: [0, 0], 1: [1, -1], 2: [1, 1], 3: [0, -1], 4: [0, 1], 5: [-1, -1] };
+    const H: Record<number, [number, number]> = { [-1]: [-2, 1], 0: [0, 0], 1: [1, -1], 2: [1, 1], 3: [0, -1], 4: [0, 1], 5: [-1, -1], 6: [-1, 1], 7: [-2, -1] };
     const [col, row] = H[s.gear];
     this.shifter.rotation.x += (row * 0.3 - this.shifter.rotation.x) * Math.min(1, dt * 18);
     this.shifter.rotation.z += (col * 0.22 - this.shifter.rotation.z) * Math.min(1, dt * 18);

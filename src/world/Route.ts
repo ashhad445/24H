@@ -16,21 +16,21 @@ export interface Branch {
 export interface Fork { id: number; mile: number; branches: [Branch, Branch] }
 
 export const BASE_MILES = CFG.ROUTE_MILES;
-export const FORK_SPLIT = 45; // each branch swings this far sideways (m)
-export const FORK_LEN = 600; // distance over which the branches separate (m)
+export const FORK_SPLIT = 60; // each branch swings this far sideways (m)
+export const FORK_LEN = 1500; // distance over which the branches separate (m)
 const M = 1 / CFG.MILES_PER_METER; // meters per mile
 
 export const FORKS: Fork[] = [
   {
-    id: 0, mile: 100, branches: [
-      { name: 'I-15', side: 1, delta: 20, rough: 0.6, wind: 0.5, canyon: false, stop: 'Lucky Scorpion Diner', sign: ['I-15 NORTH', 'LAS VEGAS', 'Diner · Gas · +20 mi'] },
-      { name: "Devil's Canyon", side: -1, delta: -15, rough: 2.6, wind: 1.6, canyon: true, stop: 'Canyon Junkyard', sign: ["DEVIL'S CANYON", 'SHORTCUT', 'Rough road · No gas · −15 mi'] },
+    id: 0, mile: 200, branches: [
+      { name: 'I-15', side: 1, delta: 40, rough: 0.6, wind: 0.5, canyon: false, stop: 'Lucky Scorpion Diner', sign: ['I-15 NORTH', 'LAS VEGAS', 'Diner · Gas · +40 mi'] },
+      { name: "Devil's Canyon", side: -1, delta: -30, rough: 2.6, wind: 1.6, canyon: true, stop: 'Canyon Junkyard', sign: ["DEVIL'S CANYON", 'SHORTCUT', 'Rough road · No gas · −30 mi'] },
     ],
   },
   {
-    id: 1, mile: 170, branches: [
+    id: 1, mile: 340, branches: [
       { name: 'Motel Row', side: 1, delta: 0, rough: 1, wind: 0.8, canyon: false, stop: 'Roadside Motel', sign: ['MOTEL ROW', 'VACANCY', 'Sleep · Ice · Pool'] },
-      { name: 'Cactus Strip', side: -1, delta: 5, rough: 1, wind: 1, canyon: false, stop: 'Rusty Cactus Casino', sign: ['CACTUS STRIP', 'CASINO', 'Blackjack · Roulette · +5 mi'] },
+      { name: 'Cactus Strip', side: -1, delta: 10, rough: 1, wind: 1, canyon: false, stop: 'Rusty Cactus Casino', sign: ['CACTUS STRIP', 'CASINO', 'Blackjack · Roulette · +10 mi'] },
     ],
   },
 ];

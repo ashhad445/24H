@@ -14,7 +14,7 @@ export const CFG = {
   START_HOUR: 6,
 
   MILES_PER_METER: 1 / 225, // compressed miles
-  ROUTE_MILES: 250,
+  ROUTE_MILES: 500, // doubled with the 200 mph RV so a run still takes ~an hour
   MPH: 2.23694, // m/s → mph
 
   FUEL_CAPACITY: 25,
@@ -39,18 +39,23 @@ export const RV = {
   doorZ1: -0.95,
   doorTop: 2.75,
 };
+/** Nitrous: a small tank, refilled with (expensive) rocket fuel. */
+export const NOS = { CHARGES: 3, BURN: 5, ACC: 7, OVER: 1.25 };
+
 export const WHEELBASE = RV.wheelRearZ - RV.wheelFrontZ;
 
 export interface GearInfo { name: string; top: number; acc: number }
-/** index = gear + 1 (gear −1 = R, 0 = N, 1–5) */
+/** index = gear + 1 (gear −1 = R, 0 = N, 1–7) */
 export const GEARS: GearInfo[] = [
-  { name: 'R', top: -16, acc: 2.2 },
+  { name: 'R', top: -20, acc: 3.4 },
   { name: 'N', top: 0, acc: 0 },
-  { name: '1', top: 22, acc: 3.3 },
-  { name: '2', top: 42, acc: 2.8 },
-  { name: '3', top: 62, acc: 2.2 },
-  { name: '4', top: 82, acc: 1.75 },
-  { name: '5', top: 104, acc: 1.45 },
+  { name: '1', top: 30, acc: 6.0 },
+  { name: '2', top: 56, acc: 5.2 },
+  { name: '3', top: 84, acc: 4.6 },
+  { name: '4', top: 114, acc: 4.2 },
+  { name: '5', top: 146, acc: 4.0 },
+  { name: '6', top: 178, acc: 3.9 },
+  { name: '7', top: 208, acc: 3.9 },
 ];
 export const gearInfo = (g: number) => GEARS[g + 1];
 
@@ -75,6 +80,15 @@ export const PLAYER = {
 };
 
 export const PLAYER_COLORS = [0xff7f50, 0x4fc3f7, 0x9ccc65, 0xba68c8];
+
+/** Radio stations (dial order). Music is generated client-side in audio/Radio.ts. */
+export const RADIO_STATIONS = [
+  { freq: '98.1', call: 'KCAC', tag: 'Cactus Country', genre: 'country' },
+  { freq: '66.6', call: 'SURF', tag: 'Reverb Rock', genre: 'surf' },
+  { freq: '103.5', call: 'MIRAGE', tag: 'Smooth Lounge', genre: 'lounge' },
+  { freq: 'AM 1220', call: 'KDST', tag: 'Desert Talk', genre: 'talk' },
+  { freq: 'FM 91.3', call: 'VOID', tag: 'The Void Cast (dark comedy)', genre: 'podcast' },
+] as const;
 
 export const DEV = typeof location !== 'undefined' && new URLSearchParams(location.search).has('dev');
 

@@ -13,7 +13,7 @@ export interface StopHost {
   s: SharedState;
   items: ItemSim;
   toast(text: string): void;
-  sfx(name: string): void;
+  sfx(name: string, at?: [number, number, number]): void;
   name(id: number): string;
   held(id: number): ItemState | undefined;
   /** World position of an item (follows its holder when carried). */
@@ -40,6 +40,9 @@ export class RustySim {
   private siphonT = new Map<number, number>();
   private crabSpeed = [0, 0, 0];
   private slotPlayer = -1;
+
+  /** Sounds come from the middle of the lot. */
+  private sfx(name: string) { const [x, z] = fromSetLocal(RUSTY_SET, 32, 0); this.h.sfx(name, [x, 1.5, z]); }
 
   constructor(private h: StopHost) {
     h.items.statics.push(RUSTY_SET);
@@ -83,7 +86,7 @@ export class RustySim {
   private needCard(from: number) {
     if (this.h.held(from)?.k === 'card') return true;
     this.h.toast('💳 You need the debit card in your hand');
-    this.h.sfx('error');
+    this.sfx('error');
     return false;
   }
 
@@ -97,18 +100,18 @@ export class RustySim {
     if (key.startsWith('pump')) {
       const i = Number(key.slice(4));
       const pump = r.pumps[i];
-      if (held?.k === 'nozzle' && held.d === i) { held.h = -1; held.s = `pump${i}`; this.h.sfx('clank'); return true; }
+      if (held?.k === 'nozzle' && held.d === i) { held.h = -1; held.s = `pump${i}`; this.sfx('clank'); return true; }
       if (held?.k === 'jerrycan') {
         if (pump.auth <= 0) { this.h.toast('Swipe the card at the pump first'); return true; }
         const gal = Math.max(0, 5 - held.d);
         if (gal > 0 && this.h.charge(from, gal * PRICES.gas, `Gas (jerrycan) ${gal.toFixed(1)} gal`)) {
-          held.d = 5; pump.gal += gal; pump.cost += gal * PRICES.gas; this.h.sfx('pour');
+          held.d = 5; pump.gal += gal; pump.cost += gal * PRICES.gas; this.sfx('pour');
         }
         return true;
       }
       if (!this.needCard(from)) return true;
       pump.auth = 180; pump.gal = 0; pump.cost = 0;
-      this.h.sfx('cash');
+      this.sfx('cash');
       this.h.toast(`⛽ Pump ${i + 1} authorized — grab the nozzle, fuel port is on the RV's back-left`);
       return true;
     }
@@ -140,11 +143,11 @@ export class RustySim {
         r.slot.res = [0, 1, 2].map(() => Math.floor(Math.random() * SYMBOLS));
         r.slot.left = 2.4; r.slot.spins++;
         this.slotPlayer = from;
-        this.h.sfx('click');
+        this.sfx('click');
         return true;
       }
       case 'bucket':
-        if (held?.k === 'sponge') { held.d = 5; this.h.sfx('pour'); this.h.toast('🧽 Sponge is sudsy (5 scrubs)'); }
+        if (held?.k === 'sponge') { held.d = 5; this.sfx('pour'); this.h.toast('🧽 Sponge is sudsy (5 scrubs)'); }
         return true;
       case 'suv': {
         if (held?.k !== 'jerrycan') return true;
@@ -155,9 +158,9 @@ export class RustySim {
           this.siphonT.set(from, 0);
           held.d = Math.min(5, held.d + 2);
           if (Math.random() < 0.25) {
-            this.h.s.heat += 1; this.h.sfx('yell');
+            this.h.s.heat += 1; this.sfx('yell');
             this.h.toast('🚨 "HEY! THAT\'S MY TRUCK!" — someone saw you. (+1 heat)');
-          } else { this.h.sfx('pour'); this.h.toast('⛽ Siphoned 2 gal. Tastes like crime.'); }
+          } else { this.sfx('pour'); this.h.toast('⛽ Siphoned 2 gal. Tastes like crime.'); }
         }
         return true;
       }
@@ -180,7 +183,7 @@ export class RustySim {
       if (held?.k !== 'sponge' || r.wash.away > 0 || r.wash.dirt[i] <= 0) return true;
       if (held.d <= 0) { this.h.toast('Sponge is dry — dip it in the bucket'); return true; }
       held.d -= 1; r.wash.dirt[i] -= 1;
-      this.h.sfx('scrub');
+      this.sfx('scrub');
       if (r.wash.dirt.every((v) => v <= 0)) {
         this.h.credit(from, PRICES.wash, 'Car wash job');
         this.h.toast(`🚗 TOURIST: "Sparkling! Here's $${PRICES.wash}." (+$${PRICES.wash})`);
@@ -212,7 +215,7 @@ export class RustySim {
         const [pwx, pwz] = fromSetLocal(RUSTY_SET, px, pz);
         if (!w || Math.hypot(w[0] - pwx, w[2] - pwz) > HOSE_LEN) {
           it.h = -1; it.s = `pump${it.d}`;
-          this.h.sfx('clank'); this.h.toast('*SNAP* — the hose yanked the nozzle back to the pump');
+          this.sfx('clank'); this.h.toast('*SNAP* — the hose yanked the nozzle back to the pump');
         }
       }
       // shoplifting: unpaid merchandise leaving the building
@@ -227,7 +230,7 @@ export class RustySim {
           const what = itemName(it.k, it.d);
           it.p = 0;
           if (r.cletus.watch) {
-            s.heat += 1; this.h.sfx('yell');
+            s.heat += 1; this.sfx('yell');
             this.h.toast(`🚨 CLETUS: "HEY! GET BACK HERE WITH THAT ${what.toUpperCase()}!" (+1 heat)`);
           } else this.h.toast(`🤫 Five-finger discount: ${what}`);
         }
@@ -243,7 +246,7 @@ export class RustySim {
         const who = this.slotPlayer;
         if (a === b && b === c) {
           const win = a === 0 ? 250 : 100;
-          this.h.credit(who, win, 'Slots JACKPOT'); this.h.sfx('jackpot');
+          this.h.credit(who, win, 'Slots JACKPOT'); this.sfx('jackpot');
           this.h.toast(`🎰 ${a === 0 ? '7 7 7 — ' : ''}JACKPOT! +$${win}`);
         } else if (a === b || b === c || a === c) {
           this.h.credit(who, PRICES.slot, 'Slots pair'); this.h.toast('🎰 A pair — got your $5 back');
@@ -255,7 +258,7 @@ export class RustySim {
     const d = r.derby;
     if (d.phase === 1) {
       d.t -= dt;
-      if (d.t <= 0) { d.phase = 2; d.t = 0; this.crabSpeed = [0, 0, 0]; this.h.toast('🦀 AND THEY\'RE OFF!'); this.h.sfx('bell'); }
+      if (d.t <= 0) { d.phase = 2; d.t = 0; this.crabSpeed = [0, 0, 0]; this.h.toast('🦀 AND THEY\'RE OFF!'); this.sfx('bell'); }
     } else if (d.phase === 2) {
       if (d.winner < 0) {
         for (let i = 0; i < 3; i++) {

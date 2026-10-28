@@ -18,6 +18,8 @@ const insideBounds = (x: number, z: number) => Math.abs(x) < RV.innerHalfW + 0.0
 export class ItemSim {
   private vel = new Map<number, [number, number, number]>();
   private nextId = 1;
+  /** Friction coefficient of the surface each item rested on last step (0 = airborne). */
+  private grip = new Map<number, number>();
   /** World-space slots (e.g. pump holsters at a stop). */
   readonly worldSlots = new Map<string, [number, number, number]>();
   /** Static collision sets for world-frame items (stop buildings, shelves). */
@@ -38,9 +40,11 @@ export class ItemSim {
   remove(id: number) {
     this.s.items = this.s.items.filter((i) => i.id !== id);
     this.vel.delete(id);
+    this.grip.delete(id);
   }
 
   setVel(id: number, v: [number, number, number]) { this.vel.set(id, v); }
+  velOf(id: number) { return this.vel.get(id); }
 
   private placeInSlot(it: ItemState) {
     const rvSlot = SLOTS[it.s];
@@ -80,10 +84,20 @@ export class ItemSim {
       const r = KINDS[it.k]?.r ?? 0.05;
 
       if (it.rv) { v[0] -= accel.x * dt; v[2] -= accel.z * dt; }
-      v[1] -= 16 * dt;
-      // cap speed so a prop can never skip across a wall in one step
-      const sp = Math.hypot(v[0], v[1], v[2]);
-      if (it.rv && sp > 10) { v[0] *= 10 / sp; v[1] *= 10 / sp; v[2] *= 10 / sp; }
+      // Coulomb friction BEFORE moving: an item at rest stays put until pushed harder than its grip,
+      // a sliding one sheds speed fast. (The RV carpet is slicker than counters and dirt.)
+      const mu0 = this.grip.get(it.id) ?? 0;
+      if (mu0 > 0) {
+        const sp2 = Math.hypot(v[0], v[2]), loss = mu0 * 16 * dt;
+        if (sp2 <= loss) { v[0] = 0; v[2] = 0; } else { v[0] *= (sp2 - loss) / sp2; v[2] *= (sp2 - loss) / sp2; }
+      }
+      v[1] -= (it.k === 'rock' ? 6 : 16) * dt;
+      // cap speed so a prop can never skip across a wall in one step (thrown rocks are the fast exception)
+      const sp = Math.hypot(v[0], v[1], v[2]), cap = it.k === 'rock' ? 40 : 10;
+      if (it.rv && sp > cap) { v[0] *= cap / sp; v[1] *= cap / sp; v[2] *= cap / sp; }
+      // the rear window hatch: when it's open, rocks can fly out through it
+      const winOpen = rv.rearWin && it.k === 'rock';
+      const inWin = (x: number, y: number) => Math.abs(x) < 0.62 && y > 1.68 && y < 2.22;
       const wasInside = it.rv && insideBounds(it.x, it.z);
       it.x += v[0] * dt; it.y += v[1] * dt; it.z += v[2] * dt;
 
@@ -92,6 +106,7 @@ export class ItemSim {
       let floor = insideBounds(lx, lz) ? RV.floorY : 0;
       if (it.y < RV.roofY + 0.3) {
         for (const b of cols) {
+          if (winOpen && v[2] > 0.5 && inWin(lx, it.y) && b.z0 > RV.zRear - 0.2) continue; // the rear wall has a hole
           const top = b.top ?? 99;
           const over = lx > b.x0 && lx < b.x1 && lz > b.z0 && lz < b.z1;
           if (over && it.y - r >= top - 0.12) { floor = Math.max(floor, top); continue; }
@@ -130,17 +145,21 @@ export class ItemSim {
       // floor / surface
       if (it.y - r <= floor) {
         it.y = floor + r;
-        if (v[1] < 0) v[1] = v[1] < -1.5 ? -v[1] * 0.3 : 0;
-        const fr = Math.max(0, 1 - dt * 6);
-        v[0] *= fr; v[2] *= fr;
-      }
+        if (v[1] < 0) {
+          // a hard landing eats most of the sideways speed too (no skating across counters)
+          if (v[1] < -1.5) { v[0] *= 0.55; v[2] *= 0.55; }
+          v[1] = v[1] < -1.5 ? -v[1] * 0.25 : 0;
+        }
+        this.grip.set(it.id, it.rv && floor <= RV.floorY + 0.01 ? 0.5 : 1.4);
+      } else this.grip.set(it.id, 0);
 
       // write back + frame transitions
       let inside = insideBounds(lx, lz);
       // props only leave the cabin through the open door; anything else bounces back in
       if (wasInside && !inside) {
         const viaDoor = rv.doorOpen && lx > 0 && lz > RV.doorZ0 && lz < RV.doorZ1 && it.y < RV.doorTop;
-        if (!viaDoor) {
+        const viaWin = winOpen && inWin(lx, it.y) && lz > RV.zRear - 0.25;
+        if (!viaDoor && !viaWin) {
           lx = Math.max(-RV.innerHalfW + r, Math.min(RV.innerHalfW - r, lx));
           lz = Math.max(RV.zFront + r, Math.min(RV.zRear - 0.08 - r, lz));
           v[0] *= -0.3; v[2] *= -0.3;
@@ -165,6 +184,33 @@ export class ItemSim {
       }
       // items far behind the RV are lost forever
       if (!it.rv && Math.hypot(it.x - rv.x, it.z - rv.z) > 600) this.remove(it.id);
+    }
+    this.separate();
+  }
+
+  /** Loose props shove each other apart so they never pile up on one spot. */
+  private separate() {
+    const loose = this.s.items.filter((i) => i.h === -1 && !i.s);
+    for (let a = 0; a < loose.length; a++) {
+      const A = loose[a], ra = KINDS[A.k]?.r ?? 0.05;
+      for (let b = a + 1; b < loose.length; b++) {
+        const B = loose[b];
+        if (A.rv !== B.rv) continue;
+        const rb = KINDS[B.k]?.r ?? 0.05, min = (ra + rb) * 0.95;
+        const dx = B.x - A.x, dz = B.z - A.z;
+        if (Math.abs(dx) > min || Math.abs(dz) > min || Math.abs(B.y - A.y) > ra + rb) continue;
+        const d = Math.hypot(dx, dz);
+        if (d >= min) continue;
+        const nx = d > 1e-4 ? dx / d : Math.cos(A.id * 2.4), nz = d > 1e-4 ? dz / d : Math.sin(A.id * 2.4);
+        const push = (min - d) * 0.5 * 0.7;
+        A.x -= nx * push; A.z -= nz * push; B.x += nx * push; B.z += nz * push;
+        for (const it of [A, B]) {
+          if (!it.rv) continue;
+          const r = KINDS[it.k]?.r ?? 0.05;
+          it.x = Math.max(-RV.innerHalfW + r, Math.min(RV.innerHalfW - r, it.x));
+          it.z = Math.max(RV.zFront + r, Math.min(RV.zRear - 0.08 - r, it.z));
+        }
+      }
     }
   }
 }
