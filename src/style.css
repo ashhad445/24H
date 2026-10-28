@@ -45,6 +45,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1210; fon
 .tab-code { font-size: 20px; margin-bottom: 6px; }
 .tab-code b { color: var(--orange); letter-spacing: 3px; }
 #click-to-play { position: absolute; left: 50%; top: 60%; transform: translateX(-50%); background: var(--maroon); padding: 10px 22px; border-radius: 999px; font-weight: 700; animation: blink 1s infinite alternate; }
+#pause { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(360px, calc(100% - 32px)); background: rgba(25, 16, 10, .88); border: 2px solid var(--orange); border-radius: 16px; padding: 18px 22px; pointer-events: auto; text-align: center; }
+#pause h2 { margin: 0 0 10px; font-size: 24px; }
+#pause button { width: 100%; padding: 11px; font-size: 16px; font-weight: 700; border-radius: 10px; border: 0; background: var(--maroon); color: #fff; cursor: pointer; }
+#pause button:hover { filter: brightness(1.1); }
+.p-room { margin: 8px 0 4px; font-size: 14px; opacity: .85; }
+.p-group { text-align: left; margin-top: 10px; }
+.p-group label { display: grid; grid-template-columns: 70px 1fr 40px; align-items: center; gap: 10px; margin: 8px 0; font-weight: 600; font-size: 14px; }
+.p-group input[type=range] { width: 100%; accent-color: var(--orange); }
+.p-group output { text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
+.p-hint { font-size: 12px; opacity: .6; margin: 10px 0 0; }
+#map { position: fixed; inset: 0; display: grid; place-content: center; background: rgba(10, 6, 3, .55); z-index: 6; pointer-events: none; padding: 16px; }
+#map canvas { width: min(900px, calc(100vw - 32px)); height: auto; border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,.6); transform: rotate(-1deg); }
+#map p { text-align: center; color: #f4efe6; font-size: 13px; opacity: .8; margin: 10px 0 0; }
 #end { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; background: rgba(20, 10, 5, .75); pointer-events: auto; }
 #end h1 { font-size: 40px; max-width: 800px; padding: 0 16px; }
 #vitals { position: absolute; bottom: 44px; left: 14px; background: var(--panel); padding: 8px 12px; border-radius: 12px; width: 210px; font-size: 13px; }

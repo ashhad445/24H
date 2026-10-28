@@ -3,12 +3,14 @@
 // −Z = road forward, +X = right side of the road (the lot).
 import { CFG } from '../config';
 import type { Box2 } from '../rv/RV';
-import { addClearZone, roadX, roadYaw } from '../world/World';
+import { addClearZone, roadPoint, roadYaw } from '../world/World';
 import type { StaticSet } from './geom';
 
 export const RUSTY_MILE = 50;
 const Z0 = -RUSTY_MILE / CFG.MILES_PER_METER;
-export const RUSTY_FRAME = { x: roadX(Z0), z: Z0, yaw: roadYaw(Z0) };
+// origin sits 5 m right of the centerline so the lot clears the 4-lane road
+const [FX, FZ] = roadPoint(Z0, 5);
+export const RUSTY_FRAME = { x: FX, z: FZ, yaw: roadYaw(Z0) };
 
 export const PRICES = { gas: 2.5, slot: 5, crab: 15, crabWin: 45, wash: 35, overdraftLimit: -100 };
 

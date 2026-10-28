@@ -80,6 +80,8 @@ export interface CopState { phase: 0 | 1 | 2 | 3 | 4; t: number; fled: boolean }
 
 export interface SharedState {
   rv: RVState;
+  route: number[]; // branch chosen at each fork (−1 = not reached yet)
+  weather: { storm: number; wind: number }; // storm 0–1, wind = lateral push (± = right/left)
   npcs: NPCState[];
   cop: CopState;
   shark: { on: boolean; t: number };

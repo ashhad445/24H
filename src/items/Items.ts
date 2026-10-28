@@ -30,6 +30,7 @@ export const KINDS: Record<string, ItemKind> = {
   jerrycan: { name: 'Jerrycan', r: 0.15 },
   sponge: { name: 'Sponge', r: 0.06 },
   scratch: { name: 'Scratch-off ticket', r: 0.04 },
+  map: { name: 'Paper map', r: 0.08 },
 };
 
 export function itemName(k: string, d: number) {
@@ -132,6 +133,12 @@ export function buildItemMesh(k: string): THREE.Object3D {
       const tex = scratchTex();
       return stack([[new THREE.BoxGeometry(0.07, 0.002, 0.1), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }), 0]]);
     }
+    case 'map': {
+      const paper = new THREE.MeshStandardMaterial({ color: '#efe1b8', roughness: 0.9 });
+      const g = stack([[new THREE.BoxGeometry(0.22, 0.012, 0.3), paper, 0]]);
+      const line = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.26), M.red); line.rotation.y = 0.3; g.add(line);
+      return g;
+    }
     case 'spare': {
       const g = stack([[cyl(0.42, 0.25, 20), M.black, 0], [cyl(0.24, 0.26, 10), M.chrome, 0]]);
       g.rotation.x = Math.PI / 2; const w = new THREE.Group(); w.add(g); return w;
@@ -163,4 +170,5 @@ export const START_ITEMS: [string, number, number, number][] = [
   // tools
   ['extinguisher', 1.22, 1.15, -0.7], ['hammer', -0.9, 1.1, 2.0], ['tape', -1.0, 1.1, 1.7], ['coolant', 0.9, 0.8, 2.9],
   ['jerrycan', 0.35, 0.85, 3.0],
+  ['map', 0.75, 1.47, -2.85],
 ];

@@ -2,14 +2,37 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CFG } from '../config';
+import { FORKS, branchAt, chosen, forkZ, routeOffset, routeVersion, type Fork } from './Route';
 
 // ---------- road centerline ----------
-export function roadX(z: number) { return 60 * Math.sin(z / 600) + 20 * Math.sin(z / 260 + 1.3); }
-export function roadDX(z: number) { return (60 / 600) * Math.cos(z / 600) + (20 / 260) * Math.cos(z / 260 + 1.3); }
+/** The base highway before any fork offsets. */
+export function baseX(z: number) { return 60 * Math.sin(z / 600) + 20 * Math.sin(z / 260 + 1.3); }
+/** Road centerline: base highway + the branches the crew chose at each fork. */
+export function roadX(z: number) { return baseX(z) + routeOffset(z); }
+export function roadDX(z: number) { return roadX(z + 0.5) - roadX(z - 0.5); }
+/** Centerline of the branch NOT taken at `fork` (drawn near the fork, then it fades away). */
+export function altX(z: number, fork: Fork) {
+  return baseX(z) + routeOffset(z, (id) => (id === fork.id ? 1 - chosen(id) : chosen(id)));
+}
+const ALT_LEN = 1600; // how far the untaken branch is drawn past the fork
+
+/** Is (x, z) on drivable road — the main road or a fork's other branch? */
+export function onRoad(x: number, z: number, margin = ROAD_HALF + 2.3) {
+  if (Math.abs(x - roadX(z)) < margin) return true;
+  for (const f of FORKS) {
+    const fz = forkZ(f);
+    if (z < fz && z > fz - ALT_LEN && Math.abs(x - altX(z, f)) < margin) return true;
+  }
+  return false;
+}
 /** Yaw that faces along the road toward −Z. */
 export function roadYaw(z: number) { return Math.atan2(roadDX(z), 1); }
-export const LANE_OFFSET = 1.8; // right lane center (driving toward −Z, right = +X)
-export const ROAD_HALF = 4.2;
+// Four-lane highway: two lanes each way. Driving toward −Z, right = +X.
+export const LANE_W = 3.6;
+/** Lane centers for traffic heading −Z (fast lane, slow lane). Oncoming lanes are the negatives. */
+export const LANES = [LANE_W / 2, LANE_W * 1.5];
+export const LANE_OFFSET = LANES[1]; // the RV starts in the right (slow) lane
+export const ROAD_HALF = LANE_W * 2 + 0.25;
 
 const CHUNK = 250;
 const AHEAD = 6;
@@ -44,6 +67,8 @@ function cleared(wx: number, wz: number) {
 // ---------- hazards (deterministic per chunk so host & clients agree) ----------
 export interface Hazard { id: number; type: 'pothole' | 'debris'; x: number; z: number; r: number }
 const hazardCache = new Map<number, Hazard[]>();
+/** Forget hazards for chunks beyond z (route changed there). */
+export function clearHazardsBeyond(z: number) { for (const i of [...hazardCache.keys()]) if (-i * CHUNK - CHUNK < z) hazardCache.delete(i); }
 export function chunkHazards(i: number): Hazard[] {
   let h = hazardCache.get(i);
   if (h) return h;
@@ -51,16 +76,17 @@ export function chunkHazards(i: number): Hazard[] {
   if (i >= 1) {
     const r = rng(i * 7 + 31);
     const z0 = -i * CHUNK;
-    const n = r() < 0.4 ? 0 : r() < 0.75 ? 1 : 2;
+    const rough = branchAt(z0 - CHUNK / 2)?.rough ?? 1;
+    const n = Math.round((r() < 0.4 ? 0 : r() < 0.75 ? 1 : 2) * rough + (rough > 2 && r() < 0.6 ? 1 : 0));
     for (let k = 0; k < n; k++) {
       const z = z0 - r() * CHUNK;
-      const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * 2.6);
+      const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * 6.4);
       const [x, zz] = lateral(z, off);
       h.push({ id: i * 100 + k, type: 'pothole', x, z: zz, r: 0.45 + r() * 0.35 });
     }
     if (r() < 0.06) {
       const z = z0 - r() * CHUNK;
-      const [x, zz] = lateral(z, 0.8 + r() * 2.2);
+      const [x, zz] = lateral(z, 0.8 + r() * 6.2);
       h.push({ id: i * 100 + 50, type: 'debris', x, z: zz, r: 0.7 });
     }
   }
@@ -68,12 +94,12 @@ export function chunkHazards(i: number): Hazard[] {
   return h;
 }
 /** Radar speed traps: one every few chunks on the right shoulder. Limit in MPH. */
-export const SPEED_LIMIT = 55;
+export const SPEED_LIMIT = 65;
 export interface Radar { id: number; x: number; z: number; yaw: number }
 export function chunkRadar(i: number): Radar | null {
   if (i < 2 || i % 5 !== 3) return null;
   const z = -i * CHUNK - CHUNK * 0.3;
-  const [x, zz] = lateral(z, 6.5);
+  const [x, zz] = lateral(z, ROAD_HALF + 2.3);
   if (cleared(x, zz)) return null;
   return { id: i, x, z: zz, yaw: roadYaw(z) };
 }
@@ -107,12 +133,12 @@ function noiseTexture(size: number, base: string, specks: string[], count: numbe
 }
 
 /** Ribbon following the road between z0 and z1, from lateral offset a to b. */
-function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 5): THREE.BufferGeometry {
+function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 5, xf: (z: number) => number = roadX): THREE.BufferGeometry {
   const n = Math.max(1, Math.ceil(Math.abs(z1 - z0) / step));
   const pos: number[] = []; const uv: number[] = []; const idx: number[] = [];
   for (let k = 0; k <= n; k++) {
     const z = z0 + ((z1 - z0) * k) / n;
-    const cx = roadX(z); const dx = roadDX(z);
+    const cx = xf(z); const dx = xf(z + 0.5) - xf(z - 0.5);
     const len = Math.hypot(1, dx); const nx = 1 / len; const nz = -dx / len;
     for (const off of [a, b]) {
       pos.push(cx + nx * off, y, z + nz * off);
@@ -171,6 +197,11 @@ export class World {
   private sunDir = new THREE.Vector3(0.3, 0.6, -0.4).normalize();
   /** 0 = night, 1 = full day */
   daylight = 1;
+  private stars: THREE.Points;
+  private moon: THREE.DirectionalLight;
+  private dust: THREE.Points;
+  private dustMat: THREE.PointsMaterial;
+  private storm = 0;
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.group);
@@ -194,6 +225,29 @@ export class World {
     this.sky.renderOrder = -1;
     scene.add(this.sky);
     scene.fog = new THREE.Fog(0xf2d9b0, 250, 1500);
+
+    // night sky: stars on the upper hemisphere + dim blue moonlight
+    const starPos: number[] = [];
+    for (let i = 0; i < 1800; i++) {
+      const u = Math.random() * Math.PI * 2, v = Math.acos(Math.random() * 0.95);
+      starPos.push(Math.sin(v) * Math.cos(u) * 1700, Math.cos(v) * 1700, Math.sin(v) * Math.sin(u) * 1700);
+    }
+    const starGeo = new THREE.BufferGeometry(); starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
+    this.stars.renderOrder = -1;
+    scene.add(this.stars);
+    this.moon = new THREE.DirectionalLight('#8fa8ff', 0);
+    this.moon.position.set(-200, 300, 100);
+    scene.add(this.moon);
+
+    // sandstorm dust around the camera
+    const dustPos = new Float32Array(1500 * 3);
+    for (let i = 0; i < dustPos.length; i++) dustPos[i] = (Math.random() - 0.5) * 60;
+    const dustGeo = new THREE.BufferGeometry(); dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+    this.dustMat = new THREE.PointsMaterial({ color: '#c9a06a', size: 0.14, transparent: true, opacity: 0, depthWrite: false });
+    this.dust = new THREE.Points(dustGeo, this.dustMat);
+    this.dust.frustumCulled = false;
+    scene.add(this.dust);
 
     // lights
     this.hemi = new THREE.HemisphereLight(0xcfe3ff, 0xc89a6a, 0.8);
@@ -243,6 +297,7 @@ export class World {
       pole: buildPole(),
       pothole: new THREE.CircleGeometry(1, 9).rotateX(-Math.PI / 2),
       debris: new THREE.TorusGeometry(0.22, 0.06, 5, 8, Math.PI * 0.8),
+      cliff: new THREE.BoxGeometry(1, 1, 1, 2, 3, 2).translate(0, 0.5, 0),
     };
     this.signTex = BILLBOARDS.map((b) => signTexture(b.lines, b.bg, b.fg));
     this.radarTex = (() => {
@@ -258,7 +313,16 @@ export class World {
   }
 
   /** Stream chunks around focus, move sky/ground/sun, apply time of day. */
-  update(focus: THREE.Vector3, camPos: THREE.Vector3, hour: number) {
+  private builtRoute = -1;
+
+  update(focus: THREE.Vector3, camPos: THREE.Vector3, hour: number, storm = 0, wind = 0, dt = 0.016) {
+    this.storm = storm;
+    if (routeVersion() !== this.builtRoute) {
+      // the road beyond a fork moved: rebuild everything streamed in
+      this.builtRoute = routeVersion();
+      for (const [, c] of this.chunks) { this.group.remove(c.group); c.disposables.forEach((d) => d.dispose()); }
+      this.chunks.clear();
+    }
     const ci = Math.floor(-focus.z / CHUNK);
     for (let i = ci - BEHIND; i <= ci + AHEAD; i++) if (i >= -2 && !this.chunks.has(i)) this.chunks.set(i, this.buildChunk(i));
     for (const [i, c] of this.chunks) {
@@ -270,6 +334,23 @@ export class World {
     }
 
     this.sky.position.copy(camPos);
+    this.stars.position.copy(camPos);
+    // dust: drift with the wind, wrap inside a 60 m box around the camera
+    this.dustMat.opacity = storm * 0.85;
+    this.dust.visible = storm > 0.02;
+    if (this.dust.visible) {
+      const a = this.dust.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const arr = a.array as Float32Array;
+      const vx = wind * 14 + 3, vz = 5, vy = -0.6;
+      const wrap = (v: number) => ((((v + 30) % 60) + 60) % 60) - 30;
+      for (let i = 0; i < arr.length; i += 3) {
+        arr[i] = wrap(arr[i] + vx * dt + (Math.random() - 0.5) * 0.05);
+        arr[i + 1] = wrap(arr[i + 1] + vy * dt);
+        arr[i + 2] = wrap(arr[i + 2] + vz * dt);
+      }
+      a.needsUpdate = true;
+      this.dust.position.copy(camPos);
+    }
     const gx = Math.round(focus.x / 24) * 24; const gz = Math.round(focus.z / 24) * 24;
     this.ground.position.set(gx, -0.02, gz);
     this.groundTex.offset.set(gx / 24, -gz / 24);
@@ -290,13 +371,60 @@ export class World {
 
     const top = new THREE.Color('#0b1030').lerp(new THREE.Color('#3d7fd6'), day);
     const hor = new THREE.Color('#1c2245').lerp(new THREE.Color('#f2d9b0'), day).lerp(new THREE.Color('#f08a4b'), dusk * 0.7);
+    // sandstorm: brown sky, thick fog, dimmer sun
+    const st = this.storm;
+    const dustCol = new THREE.Color('#b08458').multiplyScalar(0.35 + 0.65 * day);
+    top.lerp(dustCol, st * 0.85); hor.lerp(dustCol, st);
     this.skyMat.uniforms.top.value.copy(top);
     this.skyMat.uniforms.horizon.value.copy(hor);
-    (this.scene.fog as THREE.Fog).color.copy(hor);
-    this.sun.intensity = 2.6 * day;
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(hor);
+    fog.near = THREE.MathUtils.lerp(250, 4, st);
+    fog.far = THREE.MathUtils.lerp(1500, 75, st);
+    (this.stars.material as THREE.PointsMaterial).opacity = (1 - day) * (1 - st) * 0.9;
+    this.moon.intensity = (1 - day) * 0.35;
+    this.sun.intensity = 2.6 * day * (1 - st * 0.6);
     this.sun.color.set('#fff0d0').lerp(new THREE.Color('#ff9a50'), dusk);
-    this.hemi.intensity = 0.15 + 0.75 * day;
+    this.hemi.intensity = 0.07 + 0.83 * day;
     this.hemi.color.set('#cfe3ff').lerp(new THREE.Color('#4a5a8a'), 1 - day);
+  }
+
+  /** Green overhead highway signs announcing a fork, one per branch. */
+  private buildGantry(group: THREE.Group, f: Fork, gz: number, disposables: THREE.BufferGeometry[]) {
+    const g = new THREE.Group();
+    const steel = this.mats.post;
+    const postGeo = new THREE.BoxGeometry(0.3, 7.4, 0.3).translate(0, 3.7, 0);
+    const beamGeo = new THREE.BoxGeometry(2 * ROAD_HALF + 5, 0.45, 0.45);
+    disposables.push(postGeo, beamGeo);
+    for (const side of [-1, 1]) { const p = new THREE.Mesh(postGeo, steel); p.position.x = side * (ROAD_HALF + 2.3); p.castShadow = true; g.add(p); }
+    const beam = new THREE.Mesh(beamGeo, steel); beam.position.y = 7.1; g.add(beam);
+    for (const b of f.branches) {
+      const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+      const x = c.getContext('2d')!;
+      x.fillStyle = '#0b6b3a'; x.fillRect(0, 0, 512, 256);
+      x.strokeStyle = '#fff'; x.lineWidth = 8; x.strokeRect(10, 10, 492, 236);
+      x.fillStyle = '#fff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = 'bold 60px Arial'; x.fillText(b.sign[0], 256, 62);
+      x.font = 'bold 40px Arial'; x.fillText(b.sign[1], 256, 125);
+      x.font = '28px Arial'; x.fillText(b.sign[2], 256, 178);
+      x.font = 'bold 56px Arial'; x.fillText(b.side < 0 ? '⬉' : '⬈', b.side < 0 ? 52 : 460, 216);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(7, 3.5), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
+      disposables.push(plate.geometry);
+      plate.position.set(b.side * 4.6, 7.1, 0.3);
+      g.add(plate);
+    }
+    // face oncoming RVs (they approach from +Z)
+    const [x, z] = lateral(gz, 0);
+    g.position.set(x, 0, z); g.rotation.y = roadYaw(gz);
+    group.add(g);
+    // gore-point chevrons where the branches split
+    const fz = forkZ(f);
+    const chev = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.0, 0.1), new THREE.MeshStandardMaterial({ color: '#ffd600', emissive: '#ffb300', emissiveIntensity: 0.4 }));
+    disposables.push(chev.geometry);
+    const [cx, cz] = [(roadX(fz - 260) + altX(fz - 260, f)) / 2, fz - 260];
+    chev.position.set(cx, 0.9, cz); chev.rotation.y = roadYaw(fz);
+    group.add(chev);
   }
 
   private buildChunk(i: number): Chunk {
@@ -308,17 +436,48 @@ export class World {
       const m = new THREE.Mesh(geo, mat); m.receiveShadow = receive; group.add(m); return m;
     };
 
-    // road surface
-    add(ribbon(z0, z1, -ROAD_HALF, ROAD_HALF, 0.0), this.mats.asphalt);
-    add(ribbon(z0, z1, -ROAD_HALF - 1.6, -ROAD_HALF, -0.005), this.mats.shoulder);
-    add(ribbon(z0, z1, ROAD_HALF, ROAD_HALF + 1.6, -0.005), this.mats.shoulder);
-    add(ribbon(z0, z1, -3.85, -3.7, 0.012), this.mats.white);
-    add(ribbon(z0, z1, 3.7, 3.85, 0.012), this.mats.white);
-    // dashed center line (merged)
-    const dashes: THREE.BufferGeometry[] = [];
-    for (let z = z0; z > z1; z -= 12) dashes.push(ribbon(z, z - 6, -0.08, 0.08, 0.012, 3));
-    const dashGeo = mergeGeometries(dashes); dashes.forEach((d) => d.dispose());
-    add(dashGeo, this.mats.yellow);
+    // road surface (main road, plus the other branch near forks)
+    const surface = (za: number, zb: number, xf: (z: number) => number, y = 0) => {
+      add(ribbon(za, zb, -ROAD_HALF, ROAD_HALF, y, 5, xf), this.mats.asphalt);
+      add(ribbon(za, zb, -ROAD_HALF - 1.6, -ROAD_HALF, y - 0.005, 5, xf), this.mats.shoulder);
+      add(ribbon(za, zb, ROAD_HALF, ROAD_HALF + 1.6, y - 0.005, 5, xf), this.mats.shoulder);
+      // edge lines, double-yellow center, dashed white lane dividers
+      add(ribbon(za, zb, -ROAD_HALF + 0.1, -ROAD_HALF + 0.25, y + 0.012, 5, xf), this.mats.white);
+      add(ribbon(za, zb, ROAD_HALF - 0.25, ROAD_HALF - 0.1, y + 0.012, 5, xf), this.mats.white);
+      add(ribbon(za, zb, -0.22, -0.08, y + 0.012, 5, xf), this.mats.yellow);
+      add(ribbon(za, zb, 0.08, 0.22, y + 0.012, 5, xf), this.mats.yellow);
+      const dashes: THREE.BufferGeometry[] = [];
+      for (let z = za - (((za % 12) + 12) % 12); z > zb; z -= 12) {
+        for (const off of [-LANE_W, LANE_W]) dashes.push(ribbon(z, Math.max(zb, z - 5), off - 0.07, off + 0.07, y + 0.012, 3, xf));
+      }
+      if (dashes.length) { add(mergeGeometries(dashes), this.mats.white); dashes.forEach((d) => d.dispose()); }
+    };
+    surface(z0, z1, roadX);
+    for (const f of FORKS) {
+      const fz = forkZ(f);
+      const za = Math.min(z0, fz), zb = Math.max(z1, fz - ALT_LEN);
+      if (za > zb) surface(za, zb, (z) => altX(z, f), 0.002);
+      // overhead gantry before the split
+      const gz = fz + 320;
+      if (gz <= z0 && gz > z1) this.buildGantry(group, f, gz, disposables);
+    }
+    // canyon cliffs along the shortcut
+    const branch = branchAt((z0 + z1) / 2);
+    if (branch?.canyon) {
+      const rc = rng(i * 13 + 7);
+      const cliffs: THREE.Matrix4[] = [];
+      for (let z = z0; z > z1; z -= 22) {
+        for (const side of [-1, 1]) {
+          const [x, zz] = lateral(z, side * (ROAD_HALF + 14 + rc() * 7));
+          if (onRoad(x, zz, 14)) continue; // keep clear of the other branch near the fork
+          cliffs.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rc() * 0.6, 0)), new THREE.Vector3(10 + rc() * 8, 16 + rc() * 22, 24)));
+        }
+      }
+      const im = new THREE.InstancedMesh(this.geos.cliff, this.mats.mesa, cliffs.length);
+      cliffs.forEach((m, j) => im.setMatrixAt(j, m));
+      im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
+      group.add(im);
+    }
 
     // props (instanced per type)
     const r = rng(i + 1000);
@@ -329,9 +488,9 @@ export class World {
     for (let k = 0; k < 70; k++) {
       const z = z0 - r() * CHUNK;
       const side = r() < 0.5 ? -1 : 1;
-      const off = side * (9 + Math.pow(r(), 1.6) * 140);
+      const off = side * (ROAD_HALF + 5 + Math.pow(r(), 1.6) * 140);
       const [x, zz] = lateral(z, off);
-      if (cleared(x, zz)) continue;
+      if (cleared(x, zz) || onRoad(x, zz, 8)) continue;
       const t = r();
       if (t < 0.25) place.saguaro.push(m4(x, 0, zz, 0.8 + r() * 0.7, r() * 6.28));
       else if (t < 0.4) place.barrel.push(m4(x, 0, zz, 0.7 + r() * 0.6, r() * 6.28));
@@ -346,7 +505,7 @@ export class World {
       place.mesa.push(m4(x, 0, zz, s, r() * 6.28, 12 + r() * 30));
     }
     for (let z = z0 - (i * 7) % 60; z > z1; z -= 60) {
-      const [x, zz] = lateral(z, 9.5);
+      const [x, zz] = lateral(z, ROAD_HALF + 5);
       if (cleared(x, zz)) continue;
       place.pole.push(m4(x, 0, zz, 1, -roadYaw(z)));
     }
@@ -396,9 +555,9 @@ export class World {
     }
 
     // occasional billboard on the right side
-    if (i >= 0 && i % 3 === 1 && !cleared(...lateral(z0 - CHUNK * 0.5, 16))) {
+    if (i >= 0 && i % 3 === 1 && !cleared(...lateral(z0 - CHUNK * 0.5, ROAD_HALF + 12))) {
       const z = z0 - CHUNK * 0.5;
-      const [x, zz] = lateral(z, 16);
+      const [x, zz] = lateral(z, ROAD_HALF + 12);
       const bb = new THREE.Group();
       const tex = this.signTex[Math.floor(i / 3) % this.signTex.length];
       const board = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.2), [
@@ -421,7 +580,7 @@ export class World {
     const mPerMile = 1 / CFG.MILES_PER_METER;
     for (let mile = Math.ceil(-z0 / mPerMile); mile * mPerMile < -z1; mile++) {
       const z = -mile * mPerMile;
-      const [x, zz] = lateral(z, 6.2);
+      const [x, zz] = lateral(z, ROAD_HALF + 2);
       if (cleared(x, zz)) continue;
       const post = new THREE.Mesh(this.geos.markerPost ?? (this.geos.markerPost = new THREE.BoxGeometry(0.08, 1.2, 0.08).translate(0, 0.6, 0)), this.mats.post);
       const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.5), new THREE.MeshStandardMaterial({ map: markerTex(mile), roughness: 0.7 }));

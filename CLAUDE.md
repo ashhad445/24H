@@ -274,12 +274,26 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] HUD warnings, siren audio, mirror shows pursuers
 - [x] Fix: cabin acceleration clamped to ~1.3 g and props can only leave through the open door (crashes used to fling everything through the walls)
 - Tests: `npx tsx scripts/sim-phase4.ts`, `npx tsx scripts/sim-containment.ts`
-### Phase 5 — Forks, all stops, day/night, weather
+### Phase 5 — Route, forks, night, weather, finale  ← **core built; new stops pending**
+- [x] Route model (`world/Route.ts`): road = base highway + per-fork lateral offsets, so the branch you drive down becomes the road. Host locks the branch 260 m past the split; choices sync in snapshots; World rebuilds chunks and hazards
+- [x] Fork A (mile 100): I-15 (+20 mi, smooth) vs Devil's Canyon (−15 mi, cliffs, ×2.6 potholes, ×1.6 wind). Fork B (mile 170): Motel Row vs Cactus Strip (+5 mi). Overhead green gantries + gore chevrons; the untaken branch is drawn 1.6 km then fades
+- [x] Paper map item (navigator dash): hold + M / click → parchment route map with forks, branch deltas, stops, YOU marker, time & money
+- [x] Night: stars, moonlight, near-black hemisphere light → headlights matter; windshield grime lit correctly
+- [x] Sandstorms (random, more on windy branches): brown sky, 75 m fog, blowing dust, grime build-up, wind audio; gusty crosswind pushes the RV sideways
+- [x] Little Desert Chapel + neon heart arch at `chapelZ()` (moves with route choices); driving through it ends the run (JUST MARRIED vs EMPTY-HANDED)
+- [x] HUD mile counter = progress miles / route total; volume mixer (Master / Vehicle / Effects / Radio) + mouse sensitivity in the Esc pause menu
+- [x] 4-lane highway (2 each way, double yellow, dashed lanes, speed limit 65); RV tops out ~104 mph (0–60 ≈ 13 s)
+- [x] Traffic rewrite: per-lane cars, overtaking within their side, keep-right, spaced spawns, wrecks limp to the shoulder, safe speed vs *every* obstacle ahead (no cut-out crashes). Fixed a feedback bug where cars drifted along curves (caused bunching + roaming)
+- [x] Damage softened: crashes capped at −14, rams −1.6…−2, potholes −0.6×; Roscoe only rams if you fled a ticket
+- [ ] New stops: Lucky Scorpion Diner, Canyon Junkyard, Roadside Motel, Rusty Cactus Casino, Last Chance Gas
+- Dev (`?dev`): F9 Rusty's · F10 next fork · F8 chapel · F7 sandstorm · F6 jump to 22:00. Tests: `sim-phase5.ts`, `sim-parked.ts`
 ### Phase 6 — Audio, radio, juice
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑10‑29 — Phase 5 core built** (forks, map, night, sandstorms, chapel ending, 4-lane highway, traffic rewrite, volume menu).
+
 **2026‑10‑29 — Phase 4 built** (traffic, radar, Roscoe, Loan Shark).
 
 **2026‑10‑29 — Phase 3 built** (Rusty's Oasis). Food can now be restocked; money matters.

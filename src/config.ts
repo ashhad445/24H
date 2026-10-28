@@ -46,11 +46,11 @@ export interface GearInfo { name: string; top: number; acc: number }
 export const GEARS: GearInfo[] = [
   { name: 'R', top: -16, acc: 2.2 },
   { name: 'N', top: 0, acc: 0 },
-  { name: '1', top: 18, acc: 3.0 },
-  { name: '2', top: 34, acc: 2.5 },
-  { name: '3', top: 52, acc: 1.9 },
-  { name: '4', top: 70, acc: 1.4 },
-  { name: '5', top: 90, acc: 1.05 },
+  { name: '1', top: 22, acc: 3.3 },
+  { name: '2', top: 42, acc: 2.8 },
+  { name: '3', top: 62, acc: 2.2 },
+  { name: '4', top: 82, acc: 1.75 },
+  { name: '5', top: 104, acc: 1.45 },
 ];
 export const gearInfo = (g: number) => GEARS[g + 1];
 

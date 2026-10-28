@@ -32,7 +32,7 @@ const drive = (sec: number) => {
     let err = Math.atan2(-(tx - r.x), -(az - r.z)) - r.yaw; err = Math.atan2(Math.sin(err), Math.cos(err));
     const mph = r.speed * 2.237;
     // simple adaptive cruise: brake for a car in our lane ahead
-    const lead = s.npcs.find((n) => n.k !== 'cop' && n.k !== 'shark' && r.z - n.z > 0 && r.z - n.z < 45 && Math.abs(n.x - (roadX(n.z) + 1.8)) < 1.5 && Math.cos(n.yaw - r.yaw) > 0);
+    const lead = s.npcs.find((n) => n.k !== 'cop' && n.k !== 'shark' && r.z - n.z > 0 && r.z - n.z < 45 && Math.abs(n.x - (roadX(n.z) + LANE_OFFSET)) < 2.4 && Math.cos(n.yaw - r.yaw) > 0);
     const brake = (wantMph === 0 && r.speed > 0.3) || (lead && lead.speed < r.speed);
     host.handle(1, { t: 'drive', i: { th: !brake && mph < wantMph ? 0.9 : 0.1, br: brake ? 1 : 0, st: Math.max(-1, Math.min(1, err * 6)), horn: false } });
     host.step(1 / 60);

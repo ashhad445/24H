@@ -8,8 +8,11 @@ import { obbHitsBox, toSetLocal } from '../stops/geom';
 import { PRICES, RUSTY_SET } from '../stops/rusty';
 import { RustySim, newRustyState, type StopHost } from '../stops/RustySim';
 import { TrafficSim } from '../traffic/TrafficSim';
-import { LANE_OFFSET, hazardsNear, roadX, roadYaw } from '../world/World';
+import { LANE_OFFSET, baseX, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
+import { FORKS, branchAt, chapelZ, chosen, forkZ, routeOffset, setRouteChoices } from '../world/Route';
 import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
+
+const totalMilesWith = (route: number[]) => CFG.ROUTE_MILES + FORKS.reduce((a, f) => a + f.branches[Math.max(0, route[f.id])].delta, 0);
 
 const WHEELS: [number, number][] = [[-RV.wheelX, RV.wheelFrontZ], [RV.wheelX, RV.wheelFrontZ], [-RV.wheelX, RV.wheelRearZ], [RV.wheelX, RV.wheelRearZ]];
 const FOOD_KINDS = new Set(Object.entries(KINDS).filter(([, k]) => k.food).map(([n]) => n));
@@ -42,6 +45,8 @@ export class HostSim implements StopHost {
       rv: newRVState(x, -LANE_OFFSET * Math.sin(yaw), yaw),
       cab: { stoveOn: false, fire: 0, smoke: 0, fuseOut: false, flat: -1, nuts: 0, brew: 0 },
       rusty: newRustyState(),
+      route: FORKS.map(() => -1),
+      weather: { storm: 0, wind: 0 },
       npcs: [],
       cop: { phase: 0, t: 0, fled: false },
       shark: { on: false, t: 0 },
@@ -321,7 +326,7 @@ export class HostSim implements StopHost {
   joltAll(mag: number) {
     this.items.jolt(mag);
     this.emit({ t: 'ev', k: 'jolt', mag });
-    this.s.rv.integrity = Math.max(0, this.s.rv.integrity - mag * 1.0);
+    this.s.rv.integrity = Math.max(0, this.s.rv.integrity - mag * 0.6);
     if (mag >= SURV.FUSE_JOLT && !this.s.cab.fuseOut && Math.random() < 0.4) {
       this.s.cab.fuseOut = true;
       const f = this.items.spawn('fuse', true, 0.65, 1.8, RV.zRear - 0.25);
@@ -329,6 +334,51 @@ export class HostSim implements StopHost {
       this.sfx('pop');
       this.toast('⚡ Fuse popped out! Lights & gauges dead');
     }
+  }
+
+  private stormIn = 150 + Math.random() * 150;
+  private stormLeft = 0;
+
+  /** Lock in a branch once the RV is committed past the split. */
+  private stepRoute() {
+    const s = this.s, rv = s.rv;
+    let changed = false;
+    for (const f of FORKS) {
+      if (s.route[f.id] !== -1 || rv.z > forkZ(f) - 260) continue;
+      const branchX = (k: number) => baseX(rv.z) + routeOffset(rv.z, (id) => (id === f.id ? k : chosen(id)));
+      const pick = Math.abs(rv.x - branchX(0)) <= Math.abs(rv.x - branchX(1)) ? 0 : 1;
+      s.route[f.id] = pick;
+      changed = true;
+      const b = f.branches[pick];
+      this.toast(`🛣️ You took ${b.name} → ${b.stop}. Wedding is now ${totalMilesWith(s.route)} miles total.`);
+    }
+    if (changed) { const z = setRouteChoices(s.route); if (z !== null) clearHazardsBeyond(z); }
+  }
+
+  private stepWeather(dt: number) {
+    const s = this.s, rv = s.rv, w = s.weather;
+    const windMul = branchAt(rv.z)?.wind ?? 0.6;
+    if (this.stormLeft > 0) {
+      this.stormLeft -= dt;
+      if (this.stormLeft <= 0) this.toast('🌤️ The sandstorm is clearing.');
+    } else {
+      this.stormIn -= dt * windMul;
+      if (this.stormIn <= 0) {
+        this.stormLeft = 45 + Math.random() * 45;
+        this.stormIn = 160 + Math.random() * 200;
+        this.toast('🌪️ SANDSTORM rolling in! Wipers on, headlights on, slow down.');
+      }
+    }
+    const target = this.stormLeft > 0 ? 1 : 0;
+    w.storm += Math.max(-dt / 15, Math.min(dt / 15, target - w.storm));
+    // gusty crosswind: stronger in storms and on exposed branches (the canyon)
+    w.wind = (w.storm * 1.0 + 0.15) * windMul * (0.65 * Math.sin(this.t * 0.37) + 0.35 * Math.sin(this.t * 1.31 + 1));
+    if (Math.abs(rv.speed) > 2) {
+      // push the RV sideways along its right vector (cos yaw, −sin yaw)
+      const push = w.wind * 1.3 * dt;
+      rv.x += Math.cos(rv.yaw) * push; rv.z += -Math.sin(rv.yaw) * push;
+    }
+    rv.grime = Math.min(1, rv.grime + w.storm * dt * 0.035);
   }
 
   private prevPose = { x: 0, z: 0, yaw: 0 };
@@ -381,7 +431,7 @@ export class HostSim implements StopHost {
     // ---------- drivetrain ----------
     const wipers = rv.wipers;
     if (cab.fuseOut) rv.wipers = false;
-    const offroad = Math.abs(rv.x - roadX(rv.z)) > 6.5;
+    const offroad = !onRoad(rv.x, rv.z);
     for (const e of stepRV(rv, this.aux, input, dt, offroad)) {
       if (e === 'stall') { this.sfx('stall'); this.toast('Stalled! Shift down and turn the key.'); }
       else if (e === 'nofuel') this.toast('Out of gas!');
@@ -415,6 +465,11 @@ export class HostSim implements StopHost {
         }
       }
     }
+
+    // ---------- route: which branch did we take at each fork? ----------
+    this.stepRoute();
+    // ---------- weather: sandstorms + crosswind ----------
+    this.stepWeather(dt);
 
     // ---------- stop buildings: the RV can't drive through them ----------
     this.collideStatics(dt);
@@ -459,10 +514,14 @@ export class HostSim implements StopHost {
     s.clock += dt * CFG.TIME_SCALE;
     if (rv.integrity <= 0) { s.phase = 'ended'; s.ending = 'TOTALED — the RV fell apart in the desert.'; }
     if (s.clock >= CFG.RUN_HOURS * 3600) { s.phase = 'ended'; s.ending = 'MISSED IT — the wedding happened without you.'; }
-    const miles = rv.odometer * CFG.MILES_PER_METER;
-    if (miles >= CFG.ROUTE_MILES) {
+    if (rv.z < chapelZ()) {
+      // drove through the wedding arch
       s.phase = 'ended';
-      s.ending = s.money >= CFG.WEDDING_MIN_BALANCE ? 'JUST MARRIED — you made it with a gift!' : 'EMPTY-HANDED — you made it, but you\'re broke.';
+      const left = CFG.RUN_HOURS * 3600 - s.clock;
+      const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60);
+      s.ending = s.money >= CFG.WEDDING_MIN_BALANCE
+        ? `💒 JUST MARRIED — you made it with ${h}h ${m}m to spare and $${s.money.toFixed(2)} for the gift!`
+        : `💸 EMPTY-HANDED — you made it with ${h}h ${m}m to spare… and $${s.money.toFixed(2)}. Awkward.`;
     }
   }
 }

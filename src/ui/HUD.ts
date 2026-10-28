@@ -1,5 +1,6 @@
 // Minimal diegetic-first HUD: clock, odometer, card balance, reticle, prompts, toasts.
 import { CFG, ENGINE, gearInfo } from '../config';
+import { progressMiles, totalMiles } from '../world/Route';
 import type { SharedState, SeatRole } from '../types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -13,7 +14,7 @@ export class HUD {
   private el = {
     hud: $('hud'), wedding: $('h-wedding'), time: $('h-time'), miles: $('h-miles'), money: $('h-money'), badges: $('h-badges'),
     reticle: $('reticle'), prompt: $('prompt'), hints: $('hints'), toasts: $('toasts'), tab: $('tab'), end: $('end'),
-    clickToPlay: $('click-to-play'), dev: $('dev'),
+    pause: $('pause'), room: $('p-room'), dev: $('dev'),
     hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), held: $('v-held'),
     gearbox: $('gearbox'), gear: $('g-gear'), gspeed: $('g-speed'), grpm: $('g-rpm'),
     smoke: $('fx-smoke'), hangry: $('fx-hangry'), lidTop: $('fx-lid-top'), lidBot: $('fx-lid-bot'),
@@ -28,8 +29,7 @@ export class HUD {
     this.el.wedding.textContent = `💒 Wedding in ${hhmm(remaining)}`;
     this.el.wedding.classList.toggle('urgent', remaining < 3 * 3600);
     this.el.time.textContent = `🕗 ${hhmm(tod % 86400)} · Day ${day}`;
-    const miles = s.rv.odometer * CFG.MILES_PER_METER;
-    this.el.miles.textContent = `🛣️ Mile ${miles.toFixed(1)} / ${CFG.ROUTE_MILES}`;
+    this.el.miles.textContent = `🛣️ Mile ${progressMiles(s.rv.z).toFixed(1)} / ${totalMiles()}`;
     this.el.money.textContent = `💳 $${s.money.toFixed(2)}`;
     this.el.money.classList.toggle('low', s.money < CFG.WEDDING_MIN_BALANCE);
     this.el.money.classList.toggle('overdraft', s.money < 0);
@@ -40,6 +40,7 @@ export class HUD {
     if (s.cab.fuseOut) badges.push('⚡ Fuse out');
     if (s.cab.flat >= 0) badges.push('🛞 Flat tire');
     if (s.rv.integrity < 60) badges.push(`🔧 RV ${Math.round(s.rv.integrity)}%`);
+    if (s.weather.storm > 0.3) badges.push('🌪️ Sandstorm');
     if (s.rv.steam) badges.push('🌡️ Overheating');
     if (s.rv.fuel < 3) badges.push('⛽ Low fuel');
     if (s.rv.ignition === 0 && s.seats.driver !== -1) badges.push('🔑 Engine off');
@@ -89,7 +90,8 @@ export class HUD {
           ? 'E / Click use · combine   Click eat (food) · spray (hold)   G drop   RMB throw   Tab players'
           : 'WASD move   Shift sprint   Space jump   E / Click grab · interact   Tab players';
 
-    this.el.clickToPlay.classList.toggle('hidden', opts.locked || s.phase === 'ended');
+    this.el.pause.classList.toggle('hidden', opts.locked || s.phase === 'ended');
+    if (!opts.locked) this.el.room.textContent = opts.room === 'SOLO' ? 'Solo run' : `Room code: ${opts.room}`;
     this.el.tab.classList.toggle('hidden', !opts.tab);
     if (opts.tab) this.el.tab.innerHTML = `<div class="tab-code">Room <b>${opts.room}</b></div>` + opts.players.map((p) => `<div>${p}</div>`).join('');
 

@@ -64,7 +64,7 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
 
   // resistance & brakes
   const rolling = 0.12 + (offroad ? 0.9 : 0);
-  const aero = 0.00045 * rv.speed * rv.speed;
+  const aero = 0.00032 * rv.speed * rv.speed;
   const brakes = rv.brake * 6.5 + (rv.handbrake ? 4.5 : 0);
   rv.speed += acc * dt;
   const resist = (rolling + aero + brakes) * dt;

@@ -1,8 +1,8 @@
-// Host-only highway chaos: NPC traffic, radar traps, Sheriff Roscoe and the Loan Shark.
+// Host-only highway chaos: four-lane NPC traffic, radar traps, Sheriff Roscoe and the Loan Shark.
 import { CFG, RV } from '../config';
 import { obbObb } from '../stops/geom';
 import type { NPCState, SharedState } from '../types';
-import { LANE_OFFSET, SPEED_LIMIT, radarsNear, roadDX, roadPoint, roadX, roadYaw } from '../world/World';
+import { LANES, ROAD_HALF, SPEED_LIMIT, radarsNear, roadDX, roadPoint, roadX, roadYaw } from '../world/World';
 
 export const NPC_DIMS: Record<NPCState['k'], [number, number]> = { // half width, half length
   sedan: [0.9, 2.2], pickup: [1.0, 2.5], camper: [1.15, 3.0], cop: [0.95, 2.4], shark: [0.95, 2.3],
@@ -17,11 +17,12 @@ export interface TrafficHost {
   held(id: number): { k: string } | undefined;
 }
 
-/** Road-following data for traffic cars (host only). */
-interface Lane { dir: 1 | -1; off: number; targetOff: number; cruise: number; passing: boolean }
+/** Road-following data for a traffic car (host only). dir +1 = same way as the RV (−Z). */
+interface Lane { dir: 1 | -1; lane: number; off: number; latV: number; cruise: number; changeCd: number; s: number /* road parameter (z on the centerline) */ }
 
 const MPH = CFG.MPH;
-const TRAFFIC_COUNT = { same: 4, oncoming: 3 };
+const COUNT = { same: 7, oncoming: 5 };
+const laneOff = (dir: 1 | -1, lane: number) => dir * LANES[lane];
 
 export class TrafficSim {
   private nextId = 1;
@@ -37,21 +38,50 @@ export class TrafficSim {
 
   private get s() { return this.h.s; }
 
-  /** RV position in road coordinates: distance along (z) and lateral offset. */
+  /** RV in road coordinates: z and lateral offset from the centerline (+ = right). */
   private rvRoad() {
     const rv = this.s.rv;
-    const len = Math.hypot(1, roadDX(rv.z));
-    return { z: rv.z, off: (rv.x - roadX(rv.z)) * len };
+    return { z: rv.z, off: (rv.x - roadX(rv.z)) * Math.hypot(1, roadDX(rv.z)) };
   }
 
-  private spawnTraffic(dir: 1 | -1, z: number, speed: number) {
-    const kinds: NPCState['k'][] = ['sedan', 'sedan', 'pickup', 'camper'];
-    const k = kinds[Math.floor(Math.random() * kinds.length)];
-    const off = dir === 1 ? LANE_OFFSET : -LANE_OFFSET;
-    const [x, zz] = roadPoint(z, off);
-    const npc: NPCState = { id: this.nextId++, k, x, z: zz, yaw: roadYaw(z) + (dir === 1 ? 0 : Math.PI), speed, c: Math.floor(Math.random() * 6), w: 0 };
-    this.s.npcs.push(npc);
-    this.lanes.set(npc.id, { dir, off, targetOff: off, cruise: speed, passing: false });
+  /** Signed distance from car `n` (with direction dir) forward to z. */
+  private ahead(n: NPCState, dir: 1 | -1, z: number) { return dir === 1 ? n.z - z : z - n.z; }
+
+  /** Is the stretch of a lane from `back` m behind to `front` m ahead of z free of cars and the RV? */
+  private laneClear(dir: 1 | -1, off: number, z: number, back: number, front: number, hw: number, ignore?: NPCState) {
+    const along = (oz: number) => (dir === 1 ? z - oz : oz - z); // + = ahead of z
+    for (const o of this.s.npcs) {
+      if (o === ignore) continue;
+      const lo = this.lanes.get(o.id);
+      const ooff = lo ? lo.off : (o.x - roadX(o.z)) * Math.hypot(1, roadDX(o.z));
+      if (Math.abs(ooff - off) > hw + NPC_DIMS[o.k][0] + 0.3) continue;
+      const a = along(o.z);
+      if (a > -back && a < front) return false;
+    }
+    const R = this.rvRoad();
+    if (Math.abs(R.off - off) < hw + RV.halfW + 0.3) { const a = along(R.z); if (a > -back - 4 && a < front + 4) return false; }
+    return true;
+  }
+
+  private spawnTraffic(dir: 1 | -1) {
+    const R = this.rvRoad();
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const lane = Math.random() < (dir === 1 ? 0.6 : 0.5) ? 1 : 0; // most traffic keeps right
+      // same direction: mostly ahead at a range of speeds, some faster ones from behind
+      const behind = dir === 1 && Math.random() < 0.35;
+      const z = dir === 1 ? (behind ? R.z + 220 + Math.random() * 250 : R.z - 300 - Math.random() * 550) : R.z - 450 - Math.random() * 500;
+      const cruise = dir === -1 ? 25 + Math.random() * 8 : behind ? 33 + Math.random() * 6 : (lane === 0 ? 30 : 25) + Math.random() * 7;
+      const off = laneOff(dir, lane);
+      // keep spawns spaced out so cars don't start in a clump
+      if (!this.laneClear(dir, off, z, 70, 70, 1.2)) continue;
+      const kinds: NPCState['k'][] = ['sedan', 'sedan', 'sedan', 'pickup', 'pickup', 'camper'];
+      const k = kinds[Math.floor(Math.random() * kinds.length)];
+      const [x, zz] = roadPoint(z, off);
+      const npc: NPCState = { id: this.nextId++, k, x, z: zz, yaw: roadYaw(z) + (dir === 1 ? 0 : Math.PI), speed: cruise, c: Math.floor(Math.random() * 6), w: 0 };
+      this.s.npcs.push(npc);
+      this.lanes.set(npc.id, { dir, lane, off, latV: 0, cruise, changeCd: 2 + Math.random() * 3, s: z });
+      return;
+    }
   }
 
   private removeNpc(id: number) {
@@ -64,69 +94,75 @@ export class TrafficSim {
     const R = this.rvRoad();
 
     // ---------- keep traffic around the RV ----------
-    const traffic = s.npcs.filter((n) => this.lanes.has(n.id));
-    const same = traffic.filter((n) => this.lanes.get(n.id)!.dir === 1).length;
-    const onc = traffic.length - same;
-    if (same < TRAFFIC_COUNT.same) {
-      // mostly slower cars ahead (to overtake), sometimes a speeder from behind
-      if (Math.random() < 0.7) this.spawnTraffic(1, R.z - 350 - Math.random() * 350, 18 + Math.random() * 8);
-      else this.spawnTraffic(1, R.z + 250 + Math.random() * 150, 30 + Math.random() * 5);
-    }
-    if (onc < TRAFFIC_COUNT.oncoming) this.spawnTraffic(-1, R.z - 400 - Math.random() * 400, 22 + Math.random() * 9);
+    let same = 0, onc = 0;
+    for (const n of s.npcs) { const L = this.lanes.get(n.id); if (L) { if (L.dir === 1) same++; else onc++; } }
+    if (same < COUNT.same) this.spawnTraffic(1);
+    if (onc < COUNT.oncoming) this.spawnTraffic(-1);
 
-    for (const n of traffic) {
+    for (const n of [...s.npcs]) {
       const L = this.lanes.get(n.id);
       if (!L) continue;
-      if (Math.abs(n.z - R.z) > 900) { this.removeNpc(n.id); continue; }
-      if (n.w > 0) { n.w -= dt; n.speed = Math.max(0, n.speed - 12 * dt); if (n.w <= 0) this.removeNpc(n.id); continue; }
+      if (Math.abs(n.z - R.z) > 1000) { this.removeNpc(n.id); continue; }
+      const [hw] = NPC_DIMS[n.k];
+      L.changeCd = Math.max(0, L.changeCd - dt);
 
-      // leader in my lane (traffic or the RV), measured along the road
-      let gap = Infinity, leaderSpeed = 0;
-      const ahead = (z: number) => (L.dir === 1 ? n.z - z : z - n.z);
-      for (const o of traffic) {
+      // wrecked: limp onto the shoulder, then disappear
+      if (n.w > 0) {
+        n.w -= dt;
+        n.speed = Math.max(0, n.speed - 7 * dt);
+        const shoulder = L.dir * (ROAD_HALF + 1.4);
+        L.latV = Math.sign(shoulder - L.off) * Math.min(1.5, Math.abs(shoulder - L.off) * 2);
+        L.off += L.latV * dt;
+        if (n.w <= 0) { this.removeNpc(n.id); continue; }
+        this.place(n, L, dt);
+        continue;
+      }
+
+      // Every vehicle ahead whose body overlaps my lane (traffic or the RV). Speed limit is the
+      // tightest "can I stop behind it" bound over ALL of them, not just the nearest — so a car
+      // swerving out of the lane never reveals a stopped RV we can't stop for.
+      let gap = Infinity, leaderSpeed = 0, safe = Infinity;
+      // while changing lanes, watch both the lane I'm in and the one I'm moving into
+      const wantOff = laneOff(L.dir, L.lane);
+      const overlaps = (ooff: number, w: number) => Math.min(Math.abs(ooff - L.off), Math.abs(ooff - wantOff)) < w;
+      const consider = (g: number, sp: number) => {
+        if (g <= -1 || g > 170) return;
+        if (g < gap) { gap = g; leaderSpeed = sp; }
+        safe = Math.min(safe, g < 8 ? 0 : Math.max(0, sp) + Math.sqrt(2 * 4.5 * (g - 8)));
+      };
+      for (const o of s.npcs) {
         if (o === n) continue;
         const lo = this.lanes.get(o.id);
-        if (!lo || Math.abs(lo.off - L.off) > 1.6) continue;
-        const g = ahead(o.z);
-        if (g > 0 && g < gap) { gap = g; leaderSpeed = lo.dir === L.dir ? o.speed : -o.speed; }
+        const ooff = lo ? lo.off : (o.x - roadX(o.z)) * Math.hypot(1, roadDX(o.z));
+        if (!overlaps(ooff, hw + NPC_DIMS[o.k][0] + 0.3)) continue;
+        consider(this.ahead(n, L.dir, o.z) - NPC_DIMS[n.k][1] - NPC_DIMS[o.k][1], (lo ? lo.dir : 1) === L.dir ? o.speed : -o.speed);
       }
-      if (Math.abs(R.off - L.off) < 2.2) {
-        const g = ahead(R.z);
-        if (g > 0 && g < gap) { gap = g; leaderSpeed = L.dir === 1 ? rv.speed : -rv.speed; }
-      }
-
-      // overtake slow leaders when the oncoming lane is clear
-      if (L.dir === 1 && !L.passing && gap < 70 && leaderSpeed < L.cruise - 3) {
-        const clear = !traffic.some((o) => this.lanes.get(o.id)?.dir === -1 && o.z < n.z && n.z - o.z < 220)
-          && !(R.off < 0 && R.z < n.z && n.z - R.z < 220);
-        if (clear) { L.passing = true; L.targetOff = -LANE_OFFSET; }
-      }
-      if (L.passing && gap > 40) {
-        // back into the right lane once past
-        const behindAll = traffic.every((o) => o === n || (this.lanes.get(o.id)?.off ?? -1) < 0 || ahead(o.z) > 12 || ahead(o.z) < -12);
-        if (behindAll && !(Math.abs(R.off - LANE_OFFSET) < 2 && Math.abs(ahead(R.z)) < 14)) { L.passing = false; L.targetOff = LANE_OFFSET; }
-      }
-      // oncoming cars swerve to the shoulder if the RV is in their lane
-      if (L.dir === -1) {
-        const g = ahead(R.z);
-        L.targetOff = g > 0 && g < 80 && R.off < 0 ? -LANE_OFFSET - 2.4 : -LANE_OFFSET;
-        if (g > 0 && g < 60 && R.off < 0 && Math.random() < dt * 2) this.h.sfx('honk');
+      if (overlaps(R.off, hw + RV.halfW + 0.3)) {
+        consider(this.ahead(n, L.dir, R.z) - NPC_DIMS[n.k][1] - 3.9, L.dir === 1 ? rv.speed : -rv.speed);
       }
 
-      // speed: cruise, follow, brake
-      let target = L.passing ? L.cruise + 4 : L.cruise;
-      // never faster than we can stop within the gap (keep 9 m), relative to the leader
-      if (gap < 150) target = Math.min(target, Math.max(0, leaderSpeed) + Math.sqrt(2 * 5 * Math.max(0, gap - 9)));
-      if (gap < 9) target = 0;
-      const acc = target > n.speed ? 2.5 : 7;
-      n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), acc * dt);
-      L.off += Math.sign(L.targetOff - L.off) * Math.min(Math.abs(L.targetOff - L.off), 3.2 * dt);
+      // lane changes (only within my side of the road)
+      if (L.changeCd <= 0 && Math.abs(L.off - laneOff(L.dir, L.lane)) < 0.2) {
+        const other = 1 - L.lane;
+        const otherOff = laneOff(L.dir, other);
+        if (gap < 70 && leaderSpeed < L.cruise - 2) {
+          // blocked by someone slow: overtake if the other lane is clear
+          if (this.laneClear(L.dir, otherOff, n.z, 25, 90, hw, n)) { L.lane = other; L.changeCd = 5; }
+        } else if (L.lane === 0 && this.laneClear(L.dir, laneOff(L.dir, 1), n.z, 25, 90, hw, n)) {
+          // keep right when the slow lane is open
+          L.lane = 1; L.changeCd = 6;
+        }
+      }
 
-      // advance along the road
-      const dz = n.speed * dt * (L.dir === 1 ? -1 : 1) / Math.hypot(1, roadDX(n.z));
-      const nz = n.z + dz;
-      const [x, z] = roadPoint(nz, L.off);
-      n.x = x; n.z = z; n.yaw = roadYaw(nz) + (L.dir === 1 ? 0 : Math.PI);
+      // speed: cruise, never faster than we can stop within the gap
+      const target = Math.min(L.cruise, safe);
+      n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), (target > n.speed ? 2.4 : 8) * dt);
+
+      // smooth lateral motion toward the lane center (eased so cars steer, not slide)
+      const latTarget = Math.max(-2.2, Math.min(2.2, (laneOff(L.dir, L.lane) - L.off) * 1.6));
+      L.latV += (latTarget - L.latV) * Math.min(1, dt * 3);
+      L.off += L.latV * dt;
+      this.place(n, L, dt);
     }
 
     // ---------- radar traps ----------
@@ -135,7 +171,7 @@ export class TrafficSim {
       if (rv.z < r.z + 1 && rv.z > r.z - 30) {
         this.radarsHit.add(r.id);
         const mph = Math.abs(rv.speed) * MPH;
-        if (mph > SPEED_LIMIT + 5) {
+        if (mph > SPEED_LIMIT + 7) {
           s.heat += 1; this.h.sfx('camera');
           this.h.toast(`📸 RADAR: ${Math.round(mph)} in a ${SPEED_LIMIT}! (+1 heat)`);
         }
@@ -147,15 +183,37 @@ export class TrafficSim {
     this.collide();
   }
 
+  /**
+   * Advance a traffic car along the road and set its pose (yaw follows the lane change).
+   * Progress is tracked on the road parameter L.s — never re-derived from the world z,
+   * which is offset sideways on curves (that feedback made cars drift and bunch up).
+   */
+  private place(n: NPCState, L: Lane, dt: number) {
+    L.s += (n.speed * dt * (L.dir === 1 ? -1 : 1)) / Math.hypot(1, roadDX(L.s));
+    const [x, z] = roadPoint(L.s, L.off);
+    n.x = x; n.z = z;
+    const steer = -L.dir * Math.atan2(L.latV, Math.max(2, n.speed));
+    n.yaw = roadYaw(L.s) + (L.dir === 1 ? 0 : Math.PI) + steer;
+  }
+
   // ---------- chasers ----------
   private chaser(k: 'cop' | 'shark') { return this.s.npcs.find((n) => n.k === k); }
 
-  /** Steer a chaser toward a world point at up to vmax. */
+  /**
+   * Drive a chaser toward a world point. Far away it follows the road (fast lane) so it
+   * doesn't cut across the desert; close in it steers straight for the target.
+   */
   private drive(n: NPCState, tx: number, tz: number, vmax: number, dt: number, stopAt = 0) {
-    const dx = tx - n.x, dz = tz - n.z, d = Math.hypot(dx, dz);
-    const want = Math.atan2(-dx, -dz); // yaw facing the target (forward = −Z)
+    const d = Math.hypot(tx - n.x, tz - n.z);
+    let sx = tx, sz = tz;
+    if (d > 60) {
+      // aim at a point 30 m further along the road, in the fast lane
+      const dir = tz < n.z ? 1 : -1;
+      [sx, sz] = roadPoint(n.z - dir * 30, dir * LANES[0]);
+    }
+    const want = Math.atan2(-(sx - n.x), -(sz - n.z));
     let dy = want - n.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    n.yaw += Math.max(-1.8 * dt, Math.min(1.8 * dt, dy));
+    n.yaw += Math.max(-1.6 * dt, Math.min(1.6 * dt, dy));
     const target = d < stopAt ? 0 : Math.min(vmax, Math.max(0, (d - stopAt) * 0.9 + Math.abs(this.s.rv.speed)));
     n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), 9 * dt);
     n.x += -Math.sin(n.yaw) * n.speed * dt;
@@ -170,8 +228,9 @@ export class TrafficSim {
   }
 
   private spawnChaser(k: 'cop' | 'shark') {
-    const [x, z] = this.behindRV(260, LANE_OFFSET * 0);
-    const npc: NPCState = { id: this.nextId++, k, x, z, yaw: this.s.rv.yaw, speed: 30, c: 0, w: 0 };
+    const R = this.rvRoad();
+    const [x, z] = roadPoint(R.z + 280, LANES[0]);
+    const npc: NPCState = { id: this.nextId++, k, x, z, yaw: roadYaw(R.z + 280), speed: 32, c: 0, w: 0 };
     this.s.npcs.push(npc);
     return npc;
   }
@@ -195,23 +254,21 @@ export class TrafficSim {
     const dist = Math.hypot(car.x - rv.x, car.z - rv.z);
 
     if (cop.phase === 1 || cop.phase === 2) {
-      const [tx, tz] = this.behindRV(11);
-      this.drive(car, tx, tz, 46, dt, 1);
+      const [tx, tz] = this.behindRV(12);
+      this.drive(car, tx, tz, 48, dt, 1);
       if (dist < 25) cop.phase = 2;
-      // pulled over?
       this.stoppedT = Math.abs(rv.speed) < 0.6 && dist < 30 ? this.stoppedT + dt : 0;
       if (this.stoppedT > 2) {
         cop.phase = 3; cop.t = 0;
         this.h.toast('🤠 ROSCOE: "License, registration, and… is that a debit card?" Hand him the card at the driver window.');
       }
-      // fleeing / heavy heat → rams
-      if ((cop.fled || s.heat >= 3) && cop.phase === 2 && this.ramCd <= 0 && dist < 9) {
-        this.ramCd = 9; this.ram(car, 0.7);
-        this.h.toast('🚔 Roscoe rams the RV! "PULL. OVER."');
+      // only rams if you drove off on him mid-ticket
+      if (cop.fled && cop.phase === 2 && this.ramCd <= 0 && dist < 9) {
+        this.ramCd = 12; this.ram(car, 0.5);
+        this.h.toast('🚔 Roscoe bumps the RV! "PULL. OVER."');
       }
-      if (cop.t > 25 && cop.phase === 2 && Math.random() < dt / 30) { s.heat += 1; this.h.toast('🚔 Roscoe radios for backup… (+1 heat)'); }
+      if (cop.t > 40 && cop.phase === 2 && Math.random() < dt / 45) { s.heat += 1; this.h.toast('🚔 Roscoe radios for backup… (+1 heat)'); }
     } else if (cop.phase === 3) {
-      // parked behind, Roscoe at the window
       const [tx, tz] = this.behindRV(10);
       this.drive(car, tx, tz, 8, dt, 0.5);
       if (Math.abs(rv.speed) > 3) {
@@ -219,9 +276,8 @@ export class TrafficSim {
         this.h.toast('🚨 You drove off on Roscoe! (+2 heat) He is NOT happy.');
       }
     } else if (cop.phase === 4) {
-      // drive off ahead and vanish
-      const [tx, tz] = this.behindRV(-400, -LANE_OFFSET);
-      this.drive(car, tx, tz, 40, dt);
+      const [tx, tz] = this.behindRV(-400, -LANES[0]);
+      this.drive(car, tx, tz, 42, dt);
       if (cop.t > 20 || dist > 350) { this.s.npcs = this.s.npcs.filter((n) => n !== car); cop.phase = 0; this.copDelay = 30; }
     }
   }
@@ -232,7 +288,7 @@ export class TrafficSim {
     if (s.cop.phase !== 3) return;
     if (this.h.held(from)?.k !== 'card') { this.h.toast('🤠 ROSCOE: "The card, son. The debit card."'); return; }
     const fine = 50 + 25 * Math.max(0, s.heat - 1) + (s.cop.fled ? 50 : 0);
-    if (!this.h.charge(from, fine, `Ticket from Sheriff Roscoe`)) return;
+    if (!this.h.charge(from, fine, 'Ticket from Sheriff Roscoe')) return;
     this.h.toast(`🧾 Paid a $${fine} ticket. ROSCOE: "Drive safe now. Congratulations on the wedding."`);
     s.heat = 0; s.cop.phase = 4; s.cop.t = 0; s.cop.fled = false;
   }
@@ -253,7 +309,6 @@ export class TrafficSim {
     }
     if (!car) { s.shark.on = false; return; }
     if (s.money >= 0) {
-      // paid back: peel off
       const [tx, tz] = this.behindRV(500, -6);
       this.drive(car, tx, tz, 45, dt);
       if (Math.hypot(car.x - rv.x, car.z - rv.z) > 300) {
@@ -262,15 +317,14 @@ export class TrafficSim {
       }
       return;
     }
-    // rams every 8–12 s: close in, hit, fall back
     s.shark.t -= dt;
     const dist = Math.hypot(car.x - rv.x, car.z - rv.z);
     const attacking = s.shark.t <= 0;
     const [tx, tz] = this.behindRV(attacking ? 4 : 16, attacking ? (Math.random() < 0.5 ? -0.8 : 0.8) : 0);
-    this.drive(car, tx, tz, 50, dt, attacking ? 0 : 1);
+    this.drive(car, tx, tz, 52, dt, attacking ? 0 : 1);
     if (attacking && dist < 7.2) {
-      this.ram(car, 1.0);
-      s.shark.t = 8 + Math.random() * 4;
+      this.ram(car, 0.8);
+      s.shark.t = 9 + Math.random() * 5;
       const lines = ['"WHERE\'S MY MONEY?!"', '"NICE RV. SHAME IF SOMETHING HAPPENED TO IT."', '"INTEREST IS COMPOUNDING, PAL!"', '"PAY UP!"'];
       this.h.toast(`🦈 BAM! ${lines[Math.floor(Math.random() * lines.length)]}`);
     } else if (this.bullhornCd <= 0 && dist < 40) {
@@ -278,12 +332,12 @@ export class TrafficSim {
     }
   }
 
-  /** A chaser smacks the RV from behind: speed kick, yaw kick, jolt, damage. */
+  /** A chaser smacks the RV from behind: speed kick, small yaw kick, jolt, a little damage. */
   private ram(car: NPCState, mag: number) {
     const rv = this.s.rv;
-    rv.speed += 3 * mag;
-    rv.yaw += (Math.random() < 0.5 ? -1 : 1) * 0.12 * mag;
-    rv.integrity = Math.max(0, rv.integrity - 4 * mag);
+    rv.speed += 2.5 * mag;
+    rv.yaw += (Math.random() < 0.5 ? -1 : 1) * 0.07 * mag;
+    rv.integrity = Math.max(0, rv.integrity - 2 * mag);
     car.speed *= 0.4;
     this.h.sfx('bang');
     this.h.joltAll(mag);
@@ -300,14 +354,14 @@ export class TrafficSim {
       if (Math.abs(n.x - rv.x) > 12 || Math.abs(n.z - rv.z) > 12) continue;
       const [hw, nhl] = NPC_DIMS[n.k];
       if (!obbObb(cx, cz, rv.yaw, RV.halfW, hl, n.x, n.z, n.yaw, hw, nhl)) continue;
-      // closing speed along the RV's heading
       const nvx = -Math.sin(n.yaw) * n.speed, nvz = -Math.cos(n.yaw) * n.speed;
       const rvx = -sn * rv.speed, rvz = -c * rv.speed;
       const rel = Math.hypot(nvx - rvx, nvz - rvz);
-      const mag = Math.min(1.5, rel / 15);
-      rv.speed *= rel > 20 ? 0.2 : 0.6;
-      rv.integrity = Math.max(0, rv.integrity - rel * 0.8);
-      n.w = 6; n.speed *= 0.3;
+      const mag = Math.min(1.3, rel / 18);
+      rv.speed *= rel > 20 ? 0.35 : 0.75;
+      // the RV is a big steel box: crashes hurt, but one crash never totals it
+      rv.integrity = Math.max(0, rv.integrity - Math.min(14, rel * 0.35));
+      n.w = 8; n.speed *= 0.3;
       this.h.sfx('bang');
       this.h.joltAll(mag);
       const headOn = Math.cos(n.yaw - rv.yaw) < -0.5;

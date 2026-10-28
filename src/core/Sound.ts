@@ -1,8 +1,17 @@
 // Procedural Web Audio SFX. Real samples replace these in Phase 6.
 
+export interface Volumes { master: number; vehicle: number; effects: number; radio: number }
+export const DEFAULT_VOLUMES: Volumes = { master: 0.8, vehicle: 0.8, effects: 0.9, radio: 0.7 };
+
 export class Sound {
   ctx: AudioContext | null = null;
   private master!: GainNode;
+  /** Mixer buses: engine + horn, everything else, radio. */
+  private vehicleBus!: GainNode;
+  private sfxBus!: GainNode;
+  private radioBus!: GainNode;
+  private windGain!: GainNode;
+  private vol: Volumes = { ...DEFAULT_VOLUMES };
   private engOsc1!: OscillatorNode;
   private engOsc2!: OscillatorNode;
   private engFilter!: BiquadFilterNode;
@@ -20,8 +29,11 @@ export class Sound {
     const ctx = new AudioContext();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = 0.6;
     this.master.connect(ctx.destination);
+    this.vehicleBus = ctx.createGain(); this.vehicleBus.connect(this.master);
+    this.sfxBus = ctx.createGain(); this.sfxBus.connect(this.master);
+    this.radioBus = ctx.createGain(); this.radioBus.connect(this.master);
+    this.applyVolumes();
 
     // noise buffer
     this.noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
@@ -42,7 +54,7 @@ export class Sound {
     const g2 = ctx.createGain(); g2.gain.value = 0.4;
     this.engOsc1.connect(this.engFilter);
     this.engOsc2.connect(g2).connect(this.engFilter);
-    this.engFilter.connect(this.engGain).connect(this.master);
+    this.engFilter.connect(this.engGain).connect(this.vehicleBus);
     this.engOsc1.start(); this.engOsc2.start();
 
     // horn: two detuned squares
@@ -53,25 +65,25 @@ export class Sound {
       const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f;
       o.connect(hf); o.start();
     }
-    hf.connect(this.hornGain).connect(this.master);
+    hf.connect(this.hornGain).connect(this.vehicleBus);
 
     // radio static bed
     this.radioGain = ctx.createGain();
     this.radioGain.gain.value = 0;
     const rn = ctx.createBufferSource(); rn.buffer = this.noiseBuf; rn.loop = true;
     const rf = ctx.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 1500; rf.Q.value = 0.7;
-    rn.connect(rf).connect(this.radioGain).connect(this.master);
+    rn.connect(rf).connect(this.radioGain).connect(this.radioBus);
     rn.start();
 
     // sizzle + fire loops
     this.sizzleGain = ctx.createGain(); this.sizzleGain.gain.value = 0;
     const sz = ctx.createBufferSource(); sz.buffer = this.noiseBuf; sz.loop = true;
     const szf = ctx.createBiquadFilter(); szf.type = 'highpass'; szf.frequency.value = 3500;
-    sz.connect(szf).connect(this.sizzleGain).connect(this.master); sz.start();
+    sz.connect(szf).connect(this.sizzleGain).connect(this.sfxBus); sz.start();
     this.fireGain = ctx.createGain(); this.fireGain.gain.value = 0;
     const fr = ctx.createBufferSource(); fr.buffer = this.noiseBuf; fr.loop = true; fr.playbackRate.value = 0.5;
     const frf = ctx.createBiquadFilter(); frf.type = 'lowpass'; frf.frequency.value = 600;
-    fr.connect(frf).connect(this.fireGain).connect(this.master); fr.start();
+    fr.connect(frf).connect(this.fireGain).connect(this.sfxBus); fr.start();
 
     // police siren: a wailing tone swept by a slow LFO
     this.sirenGain = ctx.createGain(); this.sirenGain.gain.value = 0;
@@ -79,10 +91,29 @@ export class Sound {
     const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.6;
     const lfoGain = ctx.createGain(); lfoGain.gain.value = 250;
     lfo.connect(lfoGain).connect(so.frequency);
-    so.connect(this.sirenGain).connect(this.master); so.start(); lfo.start();
+    so.connect(this.sirenGain).connect(this.sfxBus); so.start(); lfo.start();
+
+    // wind / sandstorm: low rumbling noise
+    this.windGain = ctx.createGain(); this.windGain.gain.value = 0;
+    const wn = ctx.createBufferSource(); wn.buffer = this.noiseBuf; wn.loop = true; wn.playbackRate.value = 0.35;
+    const wf = ctx.createBiquadFilter(); wf.type = 'bandpass'; wf.frequency.value = 380; wf.Q.value = 0.6;
+    wn.connect(wf).connect(this.windGain).connect(this.sfxBus); wn.start();
   }
 
-  update(rpm: number, running: boolean, load: number, horn: boolean, radio: boolean, sizzle = 0, flames = 0, siren = 0) {
+  /** Set mixer levels (0–1 each). Safe to call before init(). */
+  setVolumes(v: Volumes) { this.vol = { ...v }; this.applyVolumes(); }
+  get volumes() { return { ...this.vol }; }
+  private applyVolumes() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    // perceptual curve: slider² so the low end isn't all "loud"
+    this.master.gain.setTargetAtTime(this.vol.master ** 2 * 0.9, t, 0.03);
+    this.vehicleBus.gain.setTargetAtTime(this.vol.vehicle ** 2, t, 0.03);
+    this.sfxBus.gain.setTargetAtTime(this.vol.effects ** 2, t, 0.03);
+    this.radioBus.gain.setTargetAtTime(this.vol.radio ** 2, t, 0.03);
+  }
+
+  update(rpm: number, running: boolean, load: number, horn: boolean, radio: boolean, sizzle = 0, flames = 0, siren = 0, wind = 0) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const fire = Math.max(rpm, 1) / 30; // 4-cyl firing frequency
@@ -95,6 +126,7 @@ export class Sound {
     this.sizzleGain.gain.setTargetAtTime(sizzle * 0.05, t, 0.2);
     this.fireGain.gain.setTargetAtTime(flames * 0.35, t, 0.2);
     this.sirenGain.gain.setTargetAtTime(siren * 0.07, t, 0.2);
+    this.windGain.gain.setTargetAtTime(wind * 0.5, t, 0.4);
   }
 
   play(name: string) {
@@ -139,7 +171,7 @@ export class Sound {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(this.sfxBus);
     src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
   }
 
@@ -152,7 +184,7 @@ export class Sound {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.sfxBus);
     o.start(t); o.stop(t + dur + 0.05);
   }
 }

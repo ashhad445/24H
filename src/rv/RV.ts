@@ -88,7 +88,7 @@ export class RVModel {
   private tailMat: THREE.MeshStandardMaterial;
   private domeLight: THREE.PointLight;
   private domeLens: THREE.MeshStandardMaterial;
-  private grimeMat: THREE.MeshBasicMaterial;
+  private grimeMat: THREE.MeshStandardMaterial;
   private switchMeshes: Record<string, THREE.Mesh> = {};
   private steam: THREE.Group;
   private fuseLamp!: THREE.MeshStandardMaterial;
@@ -165,7 +165,7 @@ export class RVModel {
       grad.addColorStop(0, 'rgba(160,130,90,0.25)'); grad.addColorStop(1, 'rgba(160,130,90,0.55)');
       g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
     });
-    this.grimeMat = new THREE.MeshBasicMaterial({ map: grimeTex, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    this.grimeMat = new THREE.MeshStandardMaterial({ map: grimeTex, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, roughness: 1 }); // lit, so it darkens at night
     const grime = new THREE.Mesh(new THREE.PlaneGeometry(2.44, 0.9), this.grimeMat);
     grime.position.set(0, 1.9, zFront - 0.045);
     this.body.add(grime);
@@ -305,7 +305,7 @@ export class RVModel {
       cap.position.z = 0.003; pivot.add(cap);
       this.body.add(pivot); this.needles[key] = pivot;
     };
-    gauge('speed', -0.83, 1.45, 0.1, gaugeFace('MPH', ['0', '15', '30', '45', '60', '75', '90']));
+    gauge('speed', -0.83, 1.45, 0.1, gaugeFace('MPH', ['0', '20', '40', '60', '80', '100', '120']));
     gauge('tach', -0.57, 1.45, 0.1, gaugeFace('RPM x1000', ['0', '1', '2', '3', '4', '5', '6'], 0.88));
     gauge('fuel', -1.03, 1.38, 0.06, gaugeFace('FUEL', ['E', '½', 'F']));
     gauge('temp', -0.37, 1.38, 0.06, gaugeFace('°F', ['100', '180', '260'], 0.84));
@@ -509,7 +509,7 @@ export class RVModel {
     const setNeedle = (key: keyof RVModel['needles'], f: number) => {
       this.needles[key].rotation.z = 2.356 - THREE.MathUtils.clamp(f, 0, 1) * 4.712;
     };
-    setNeedle('speed', power ? (Math.abs(s.speed) * CFG.MPH) / 90 : 0);
+    setNeedle('speed', power ? (Math.abs(s.speed) * CFG.MPH) / 120 : 0);
     setNeedle('tach', power ? s.rpm / 6500 : 0);
     setNeedle('fuel', power && s.ignition === 2 ? s.fuel / CFG.FUEL_CAPACITY : 0);
     setNeedle('temp', power ? (s.temp - 100) / 160 : 0);

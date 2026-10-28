@@ -34,6 +34,7 @@
     <div id="fx-hangry"></div>
     <div id="fx-lid-top" class="lid"></div>
     <div id="fx-lid-bot" class="lid"></div>
+    <div id="map" class="hidden"><canvas id="map-canvas" width="900" height="620"></canvas><p>M / click to fold the map</p></div>
     <div id="hud" class="hidden">
       <div id="stats">
         <div id="h-wedding"></div>
@@ -59,7 +60,19 @@
       <div id="hints"></div>
       <div id="toasts"></div>
       <div id="tab" class="hidden"></div>
-      <div id="click-to-play">Click to play</div>
+      <div id="pause" class="hidden">
+        <h2>Paused</h2>
+        <button id="p-resume" class="primary">Resume</button>
+        <div class="p-room" id="p-room"></div>
+        <div class="p-group">
+          <label>Master <input type="range" id="v-master" min="0" max="1" step="0.01" /><output></output></label>
+          <label>Vehicle <input type="range" id="v-vehicle" min="0" max="1" step="0.01" /><output></output></label>
+          <label>Effects <input type="range" id="v-effects" min="0" max="1" step="0.01" /><output></output></label>
+          <label>Radio <input type="range" id="v-radio" min="0" max="1" step="0.01" /><output></output></label>
+          <label>Mouse <input type="range" id="v-sens" min="0.0006" max="0.006" step="0.0001" /><output></output></label>
+        </div>
+        <p class="p-hint">Esc frees the mouse · click Resume to jump back in</p>
+      </div>
       <div id="end" class="hidden"><h1></h1><p>Refresh to play again.</p></div>
       <pre id="dev" class="hidden"></pre>
     </div>

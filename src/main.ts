@@ -14,10 +14,14 @@ import { RVModel } from './rv/RV';
 import { RUSTY_FRAME, RUSTY_SET } from './stops/rusty';
 import { RustyView } from './stops/RustyView';
 import { TrafficView } from './traffic/TrafficView';
+import { ChapelView } from './stops/ChapelView';
+import { MapView } from './ui/MapView';
+import { FORKS, chapelZ, forkZ, setRouteChoices } from './world/Route';
 import type { GameMsg, ItemState, Pose, SharedState } from './types';
 import { HUD } from './ui/HUD';
 import { runLobby } from './ui/Lobby';
-import { LANE_OFFSET, World, roadX, roadYaw } from './world/World';
+import { setupSettings } from './ui/Settings';
+import { LANE_OFFSET, World, clearHazardsBeyond, roadX, roadYaw } from './world/World';
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -58,12 +62,15 @@ mirrorTex.repeat.x = -1; mirrorTex.offset.x = 1; // mirror flip
 
 const input = new Input(canvas);
 const sound = new Sound();
-canvas.addEventListener('mousedown', () => sound.init());
+const settings = setupSettings(sound, input);
+canvas.addEventListener('mousedown', () => { const first = !sound.ctx; sound.init(); if (first) settings.reapply(); });
 const hud = new HUD();
 const player = new Player(camera, rv, scene);
 player.statics.push(RUSTY_SET);
 const rusty = new RustyView(scene);
 const traffic = new TrafficView(scene, rv);
+const chapel = new ChapelView(scene);
+const mapView = new MapView();
 const avatars = new Map<number, Avatar>();
 const raycaster = new THREE.Raycaster();
 raycaster.camera = camera;
@@ -221,6 +228,10 @@ async function start() {
       shared = host.s;
     } else interpolate();
 
+    // keep the road in sync with the host's fork decisions
+    const changedZ = setRouteChoices(shared.route);
+    if (changedZ !== null) clearHazardsBeyond(changedZ);
+
     rv.update(shared.rv, shared.cab, dt);
     rv.root.updateMatrixWorld(true);
 
@@ -260,10 +271,14 @@ async function start() {
           const aimed = to.length() < 4 && dir.angleTo(to) < 0.45;
           act('spray', aimed ? 1 : 0);
         }
-      } else if (input.clicked(0) && KINDS[held.k]?.food) act('self');
+      } else if (held.k === 'map' && input.clicked(0)) mapView.toggle();
+      else if (input.clicked(0) && KINDS[held.k]?.food) act('self');
       if (input.clicked(2)) dropHeld(7);
     }
     if (held && input.pressed('KeyG')) dropHeld(1.2);
+    if (held?.k === 'map' && input.pressed('KeyM')) mapView.toggle();
+    if (mapView.open && held?.k !== 'map') mapView.toggle(false);
+    mapView.update(shared);
 
     for (const a of avatars.values()) {
       a.update(dt);
@@ -286,14 +301,29 @@ async function start() {
       (host as any).prevPose = { x: r.x, z: r.z, yaw: r.yaw };
       hud.toast("DEV: teleported to Rusty's Oasis");
     }
+    const devJump = (z: number, label: string) => {
+      if (!host) return;
+      const yaw = roadYaw(z), r = host.s.rv;
+      r.x = roadX(z) + LANE_OFFSET * Math.cos(yaw); r.z = z - LANE_OFFSET * Math.sin(yaw); r.yaw = yaw; r.speed = 0;
+      (host as any).prevPose = { x: r.x, z: r.z, yaw: r.yaw };
+      hud.toast(`DEV: teleported ${label}`);
+    };
+    if (DEV && input.pressed('F10')) {
+      const next = FORKS.find((f) => shared.route[f.id] === -1);
+      if (next) devJump(forkZ(next) + 600, `before the fork at mile ${next.mile}`);
+    }
+    if (DEV && input.pressed('F8')) devJump(chapelZ() + 300, 'to the chapel');
+    if (DEV && host && input.pressed('F7')) { host.s.weather.storm = 1; (host as any).stormLeft = 60; hud.toast('DEV: sandstorm'); }
+    if (DEV && host && input.pressed('F6')) { host.s.clock = (22 - CFG.START_HOUR) * 3600; hud.toast('DEV: 22:00'); }
     items.sync(shared.items, dt);
 
     const camPos = camera.getWorldPosition(new THREE.Vector3());
-    world.update(rv.root.position, camPos, CFG.START_HOUR + shared.clock / 3600);
+    world.update(rv.root.position, camPos, CFG.START_HOUR + shared.clock / 3600, shared.weather.storm, shared.weather.wind, dt);
+    chapel.update(rv.root.position);
 
     const pan = shared.items.find((i) => i.s === 'skillet');
     const sizzle = pan && shared.cab.stoveOn && player.inRV ? 1 : 0;
-    sound.update(shared.rv.rpm, shared.rv.ignition === 2, shared.rv.throttle, shared.rv.horn, shared.rv.radio && !shared.cab.fuseOut, sizzle, player.inRV ? shared.cab.fire : shared.cab.fire * 0.3, siren);
+    sound.update(shared.rv.rpm, shared.rv.ignition === 2, shared.rv.throttle, shared.rv.horn, shared.rv.radio && !shared.cab.fuseOut, sizzle, player.inRV ? shared.cab.fire : shared.cab.fire * 0.3, siren, shared.weather.storm * (player.inRV ? 0.45 : 1) + Math.abs(shared.weather.wind) * 0.15);
 
     // networking
     snapAcc += rawDt; poseAcc += rawDt;
