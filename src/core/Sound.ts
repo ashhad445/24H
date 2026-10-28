@@ -12,6 +12,7 @@ export class Sound {
   private radioGain!: GainNode;
   private sizzleGain!: GainNode;
   private fireGain!: GainNode;
+  private sirenGain!: GainNode;
 
   /** Must be called from a user gesture. */
   init() {
@@ -71,9 +72,17 @@ export class Sound {
     const fr = ctx.createBufferSource(); fr.buffer = this.noiseBuf; fr.loop = true; fr.playbackRate.value = 0.5;
     const frf = ctx.createBiquadFilter(); frf.type = 'lowpass'; frf.frequency.value = 600;
     fr.connect(frf).connect(this.fireGain).connect(this.master); fr.start();
+
+    // police siren: a wailing tone swept by a slow LFO
+    this.sirenGain = ctx.createGain(); this.sirenGain.gain.value = 0;
+    const so = ctx.createOscillator(); so.type = 'triangle'; so.frequency.value = 800;
+    const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.6;
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 250;
+    lfo.connect(lfoGain).connect(so.frequency);
+    so.connect(this.sirenGain).connect(this.master); so.start(); lfo.start();
   }
 
-  update(rpm: number, running: boolean, load: number, horn: boolean, radio: boolean, sizzle = 0, flames = 0) {
+  update(rpm: number, running: boolean, load: number, horn: boolean, radio: boolean, sizzle = 0, flames = 0, siren = 0) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const fire = Math.max(rpm, 1) / 30; // 4-cyl firing frequency
@@ -85,6 +94,7 @@ export class Sound {
     this.radioGain.gain.setTargetAtTime(radio ? 0.025 : 0, t, 0.1);
     this.sizzleGain.gain.setTargetAtTime(sizzle * 0.05, t, 0.2);
     this.fireGain.gain.setTargetAtTime(flames * 0.35, t, 0.2);
+    this.sirenGain.gain.setTargetAtTime(siren * 0.07, t, 0.2);
   }
 
   play(name: string) {
@@ -111,6 +121,13 @@ export class Sound {
       case 'pour': this.noiseBurst(0.8, 900, 0.25); break;
       case 'whoosh': this.noiseBurst(0.7, 500, 0.7, 0, 'lowpass'); break;
       case 'sizzle': this.noiseBurst(0.5, 4000, 0.3, 0, 'highpass'); break;
+      case 'honk': this.tone(420, 420, 0.35, 'square', 0.08); this.tone(520, 520, 0.35, 'square', 0.08); break;
+      case 'camera': this.noiseBurst(0.05, 5000, 0.4); this.tone(2000, 2000, 0.08, 'sine', 0.15, 0.06); break;
+      case 'bullhorn': this.tone(180, 220, 0.25, 'sawtooth', 0.25); this.tone(220, 160, 0.4, 'sawtooth', 0.25, 0.28); break;
+      case 'scrub': for (let i = 0; i < 3; i++) this.noiseBurst(0.09, 1800, 0.25, i * 0.1); break;
+      case 'yell': this.tone(320, 520, 0.18, 'sawtooth', 0.25); this.tone(520, 260, 0.35, 'sawtooth', 0.25, 0.18); break;
+      case 'bell': for (let i = 0; i < 3; i++) this.tone(1568, 1568, 0.3, 'sine', 0.2, i * 0.15); break;
+      case 'jackpot': for (let i = 0; i < 8; i++) this.tone(880 + i * 110, 880 + i * 110, 0.12, 'square', 0.12, i * 0.09); break;
     }
   }
 

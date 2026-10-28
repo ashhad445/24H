@@ -25,10 +25,17 @@ export const KINDS: Record<string, ItemKind> = {
   coolant: { name: 'Coolant jug', r: 0.1, uses: 2 },
   fuse: { name: 'Fuse', r: 0.03 },
   spare: { name: 'Spare tire', r: 0.42 },
+  card: { name: 'Shared debit card', r: 0.03 },
+  nozzle: { name: 'Gas nozzle', r: 0.06 },
+  jerrycan: { name: 'Jerrycan', r: 0.15 },
+  sponge: { name: 'Sponge', r: 0.06 },
+  scratch: { name: 'Scratch-off ticket', r: 0.04 },
 };
 
 export function itemName(k: string, d: number) {
   if (k === 'patty') return d < 0.3 ? 'Raw patty' : d < 1 ? 'Cooking patty' : d < 1.35 ? 'Cooked patty' : 'Burnt patty';
+  if (k === 'jerrycan') return `Jerrycan (${d.toFixed(1)} gal)`;
+  if (k === 'sponge') return d > 0 ? `Soapy sponge (${d})` : 'Dry sponge';
   const kind = KINDS[k];
   if (!kind) return k;
   return kind.uses && kind.uses > 1 && k !== 'extinguisher' ? `${kind.name} (${d})` : kind.name;
@@ -100,12 +107,49 @@ export function buildItemMesh(k: string): THREE.Object3D {
       return g;
     }
     case 'fuse': return stack([[new THREE.BoxGeometry(0.04, 0.025, 0.012), M.fuse, 0], [new THREE.BoxGeometry(0.008, 0.02, 0.004), M.chrome, -0.02]]);
+    case 'card': {
+      const g = stack([[new THREE.BoxGeometry(0.086, 0.003, 0.054), mat('#00838f', { roughness: 0.35, metalness: 0.3 }), 0]]);
+      const chip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.004, 0.01), mat('#d4a017', { metalness: 0.9, roughness: 0.3 }));
+      chip.position.set(-0.025, 0.001, 0); g.add(chip);
+      return g;
+    }
+    case 'nozzle': {
+      const g = new THREE.Group();
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.05), M.black); g.add(grip);
+      const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.2, 8).rotateX(Math.PI / 2), M.steel);
+      spout.position.set(0, 0.06, -0.11); spout.rotation.x = -0.25; g.add(spout);
+      const trig = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.04), M.steel); trig.position.set(0, -0.02, -0.04); g.add(trig);
+      g.traverse((o) => { o.castShadow = true; });
+      return g;
+    }
+    case 'jerrycan': {
+      const g = stack([[new THREE.BoxGeometry(0.17, 0.36, 0.26), mat('#c62828', { roughness: 0.5 }), 0], [cyl(0.025, 0.06), M.black, 0.2]]);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.16), M.red); handle.position.set(0, 0.2, -0.04); g.add(handle);
+      return g;
+    }
+    case 'sponge': return stack([[new THREE.BoxGeometry(0.13, 0.05, 0.09), mat('#ffeb3b', { roughness: 1 }), 0]]);
+    case 'scratch': {
+      const tex = scratchTex();
+      return stack([[new THREE.BoxGeometry(0.07, 0.002, 0.1), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }), 0]]);
+    }
     case 'spare': {
       const g = stack([[cyl(0.42, 0.25, 20), M.black, 0], [cyl(0.24, 0.26, 10), M.chrome, 0]]);
       g.rotation.x = Math.PI / 2; const w = new THREE.Group(); w.add(g); return w;
     }
   }
   return new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), M.grey);
+}
+
+let _scratchTex: THREE.Texture | null = null;
+function scratchTex() {
+  if (_scratchTex) return _scratchTex;
+  const c = document.createElement('canvas'); c.width = 64; c.height = 96;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#7b1fa2'; g.fillRect(0, 0, 64, 96);
+  g.fillStyle = '#ffd54f'; g.font = 'bold 13px Arial'; g.textAlign = 'center'; g.fillText('LUCKY', 32, 18); g.fillText('DESERT', 32, 32);
+  g.fillStyle = '#b0bec5'; for (let i = 0; i < 3; i++) g.fillRect(8, 42 + i * 17, 48, 12);
+  _scratchTex = new THREE.CanvasTexture(c); _scratchTex.colorSpace = THREE.SRGBColorSpace;
+  return _scratchTex;
 }
 
 /** Starting loadout in RV-local coordinates. */
@@ -118,4 +162,5 @@ export const START_ITEMS: [string, number, number, number][] = [
   ['coffee', -0.8, 1.45, -0.2], ['energy', -1.0, 1.45, 0.1], ['soda', -0.75, 1.45, 0.3], ['soda', -1.1, 1.45, 0.45],
   // tools
   ['extinguisher', 1.22, 1.15, -0.7], ['hammer', -0.9, 1.1, 2.0], ['tape', -1.0, 1.1, 1.7], ['coolant', 0.9, 0.8, 2.9],
+  ['jerrycan', 0.35, 0.85, 3.0],
 ];

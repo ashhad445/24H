@@ -11,10 +11,13 @@ import { Effects } from './fx/Effects';
 import { Avatar } from './player/Avatar';
 import { Player } from './player/Player';
 import { RVModel } from './rv/RV';
-import type { GameMsg, ItemState, SharedState } from './types';
+import { RUSTY_FRAME, RUSTY_SET } from './stops/rusty';
+import { RustyView } from './stops/RustyView';
+import { TrafficView } from './traffic/TrafficView';
+import type { GameMsg, ItemState, Pose, SharedState } from './types';
 import { HUD } from './ui/HUD';
 import { runLobby } from './ui/Lobby';
-import { World } from './world/World';
+import { LANE_OFFSET, World, roadX, roadYaw } from './world/World';
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -58,6 +61,9 @@ const sound = new Sound();
 canvas.addEventListener('mousedown', () => sound.init());
 const hud = new HUD();
 const player = new Player(camera, rv, scene);
+player.statics.push(RUSTY_SET);
+const rusty = new RustyView(scene);
+const traffic = new TrafficView(scene, rv);
 const avatars = new Map<number, Avatar>();
 const raycaster = new THREE.Raycaster();
 raycaster.camera = camera;
@@ -102,6 +108,16 @@ async function start() {
     shared.items = [];
   }
   const items = new ItemViews(rv, dyn, camera, avatars, net.myId);
+  const poses = new Map<number, Pose>();
+  /** World position of a player's hands, from their latest pose. */
+  const handOf = (id: number): [number, number, number] | null => {
+    const p = id === net.myId ? player.pose() : poses.get(id);
+    if (!p) return null;
+    if (!p.inRV) return [p.x, p.y + 1.2, p.z];
+    const r = shared.rv; const c = Math.cos(r.yaw), sn = Math.sin(r.yaw);
+    return [r.x + p.x * c + p.z * sn, p.y + 1.2, r.z - p.x * sn + p.z * c];
+  };
+  if (host) host.handOf = handOf;
 
   net.setHandler({
     onMsg(from, m) {
@@ -109,6 +125,7 @@ async function start() {
         let a = avatars.get(from);
         if (!a) { a = new Avatar(from, nameOf(from), rv, dyn); avatars.set(from, a); }
         a.setPose(m.p);
+        poses.set(from, m.p);
         host?.crew(from);
       } else if (m.t === 'snap') {
         if (!isHost) { snaps.push({ t: performance.now() / 1000, s: m.s }); if (snaps.length > 30) snaps.shift(); }
@@ -143,10 +160,12 @@ async function start() {
   };
 
   const act = (id: string, btn = 0) => net.toHost({ t: 'act', id, btn });
-  if (DEV) (window as any).game = { net, get host() { return host; }, player, rv, world, input, get shared() { return shared; }, act };
+  if (DEV) (window as any).game = { net, get host() { return host; }, player, rv, world, input, rusty, RUSTY_SET, get shared() { return shared; }, act };
 
   let last = performance.now();
-  let snapAcc = 0, poseAcc = 0, sprayAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
+  let snapAcc = 0, poseAcc = 0, sprayAcc = 0, holdAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
+  /** Interactions that repeat while the button is held (pumping gas, siphoning). */
+  const HOLD_IDS = new Set(['fuelport', 'rusty:suv']);
   const fireWorld = new THREE.Vector3();
 
   /** What the reticle is on: an interactable id, plus whether it's bare RV hull. */
@@ -155,7 +174,7 @@ async function start() {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     raycaster.far = PLAYER.reach;
     const ctx = { held: held?.k ?? '', cab: shared.cab };
-    for (const hit of raycaster.intersectObjects([rv.root, dyn], true)) {
+    for (const hit of raycaster.intersectObjects([rv.root, dyn, rusty.group], true)) {
       const o = hit.object;
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (o.type === 'Sprite' || (mat && !Array.isArray(mat) && mat.transparent) || isDescendant(o, camera)) continue;
@@ -170,7 +189,7 @@ async function start() {
       if (id.startsWith('item:')) {
         const t = shared.items.find((i) => i.id === Number(id.slice(5)));
         if (!t || t.h !== -1) return { id: '', prompt: '', hull: false };
-        if (!held) return { id, prompt: `Grab ${itemName(t.k, t.d)}`, hull: false };
+        if (!held) return { id, prompt: `Grab ${itemName(t.k, t.d)}${t.p > 0 ? ` — $${t.p.toFixed(2)} (unpaid)` : ''}`, hull: false };
         const pair = (x: string, y: string) => (held.k === x && t.k === y) || (held.k === y && t.k === x);
         if (pair('patty', 'bun') || pair('burger', 'cheese')) return { id, prompt: `Combine with ${itemName(t.k, t.d)}`, hull: false };
         return { id: '', prompt: '', hull: false };
@@ -181,7 +200,8 @@ async function start() {
         if (!held && pid === shared.seats.driver) return { id, prompt: `Slap ${nameOf(pid)} awake`, hull: false };
         return { id: '', prompt: '', hull: false };
       }
-      const prompt = rv.promptFor(id, shared.rv, ctx);
+      if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : 'ROSCOE: "Card, please." (bring the debit card)' };
+      const prompt = id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
       return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
     }
     return { id: '', prompt: '', hull: false };
@@ -211,8 +231,8 @@ async function start() {
     if (player.seat) {
       if (input.pressed('KeyF')) act('stand');
       if (player.seat === 'driver') {
-        if (input.pressed('KeyR') || input.pressed('ShiftLeft')) act('shift_up');
-        if (input.pressed('KeyQ') || input.pressed('ControlLeft')) act('shift_down');
+        if (input.pressed('KeyE')) act('shift_up');
+        if (input.pressed('KeyQ')) act('shift_down');
         if (input.pressed('Space')) act('handbrake');
       }
     }
@@ -220,8 +240,13 @@ async function start() {
     // ---------- interaction ----------
     const held = shared.items.find((i) => i.h === net.myId);
     const look = lookAt(held);
+    const holding = input.mouseDown(0) || (input.down('KeyE') && player.seat !== 'driver');
+    if (look.id && HOLD_IDS.has(look.id) && holding && !input.clicked(0) && !input.pressed('KeyE')) {
+      if ((holdAcc += dt) >= 0.2) { holdAcc = 0; act(look.id); }
+    } else holdAcc = 0;
     if (look.id) {
-      if (input.pressed('KeyE') || input.clicked(0)) act(look.id, 0);
+      // the driver's E is the upshift, so they interact with the mouse only
+      if ((input.pressed('KeyE') && player.seat !== 'driver') || input.clicked(0)) act(look.id, 0);
       else if (input.clicked(2)) act(look.id, 2);
     } else if (held) {
       if (held.k === 'extinguisher') {
@@ -251,6 +276,16 @@ async function start() {
       fx.spray(nozzlePos, nozzleDir, dt);
     }
     fx.update(dt, shared.cab.fire);
+    rusty.update(dt, shared, rv.root.position, (id) => items.worldPosOf(id), (n) => sound.play(n));
+    const siren = traffic.update(dt, shared, camera.getWorldPosition(new THREE.Vector3()), world.daylight);
+
+    // dev: F9 teleports the RV to just before Rusty's Oasis
+    if (DEV && host && input.pressed('F9')) {
+      const z = RUSTY_FRAME.z + 160, yaw = roadYaw(z), r = host.s.rv;
+      r.x = roadX(z) + LANE_OFFSET * Math.cos(yaw); r.z = z - LANE_OFFSET * Math.sin(yaw); r.yaw = yaw; r.speed = 0;
+      (host as any).prevPose = { x: r.x, z: r.z, yaw: r.yaw };
+      hud.toast("DEV: teleported to Rusty's Oasis");
+    }
     items.sync(shared.items, dt);
 
     const camPos = camera.getWorldPosition(new THREE.Vector3());
@@ -258,7 +293,7 @@ async function start() {
 
     const pan = shared.items.find((i) => i.s === 'skillet');
     const sizzle = pan && shared.cab.stoveOn && player.inRV ? 1 : 0;
-    sound.update(shared.rv.rpm, shared.rv.ignition === 2, shared.rv.throttle, shared.rv.horn, shared.rv.radio && !shared.cab.fuseOut, sizzle, player.inRV ? shared.cab.fire : shared.cab.fire * 0.3);
+    sound.update(shared.rv.rpm, shared.rv.ignition === 2, shared.rv.throttle, shared.rv.horn, shared.rv.radio && !shared.cab.fuseOut, sizzle, player.inRV ? shared.cab.fire : shared.cab.fire * 0.3, siren);
 
     // networking
     snapAcc += rawDt; poseAcc += rawDt;

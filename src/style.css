@@ -59,4 +59,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1210; fon
 .lid { position: fixed; left: 0; right: 0; height: 0; background: #050302; pointer-events: none; z-index: 4; }
 #fx-lid-top { top: 0; border-radius: 0 0 50% 50% / 0 0 40px 40px; }
 #fx-lid-bot { bottom: 0; border-radius: 50% 50% 0 0 / 40px 40px 0 0; }
+#gearbox { position: absolute; right: 18px; bottom: 44px; width: 120px; background: var(--panel); border-radius: 14px; padding: 8px 10px 10px; text-align: center; }
+#gearbox .g-keys { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; opacity: .75; }
+#g-gear { font: 900 54px/1 'Segoe UI', system-ui, sans-serif; color: var(--orange); margin: 2px 0; text-shadow: 0 2px 6px #000; }
+#g-gear.off { color: #8a7a6a; }
+#g-gear.rev { color: #ff8a80; }
+#g-speed { font-weight: 700; font-size: 15px; }
+#gearbox .g-rpm { height: 6px; margin-top: 6px; background: rgba(255,255,255,.15); border-radius: 3px; overflow: hidden; }
+#g-rpm { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #9ccc65, #f0ad4e 70%, #ff5252 90%); }
 #dev { position: absolute; bottom: 150px; left: 14px; margin: 0; background: rgba(0,0,0,.6); padding: 8px; font-size: 12px; border-radius: 6px; }

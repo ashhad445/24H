@@ -196,8 +196,9 @@ export class RVModel {
       this.box(M.maroon, Math.min(x0, x1), Math.max(x0, x1), 1.15, 1.28, z0, z1);
     };
     stripe(-1, RV.noseZ + 0.1, zRear); stripe(1, RV.noseZ + 0.1, RV.doorZ0); stripe(1, RV.doorZ1, zRear);
-    // fuel port
-    this.box(M.dark, -halfW - 0.01, -halfW + 0.01, 0.8, 1.0, 2.5, 2.7);
+    // fuel port (rear-left)
+    const port = this.box(M.dark, -halfW - 0.03, -halfW + 0.01, 0.8, 1.0, 2.5, 2.7);
+    this.reg('fuelport', port, (s, c) => (c.held === 'nozzle' ? `Hold to pump gas (${s.fuel.toFixed(1)}/25 gal)` : c.held === 'jerrycan' ? 'Pour jerrycan into the tank' : `Fuel port (${s.fuel.toFixed(1)}/25 gal)`));
     // step under door
     this.box(M.steel, halfW, halfW + 0.3, 0.28, 0.33, RV.doorZ0, RV.doorZ1, true);
     // rear wheel arches inside
@@ -482,8 +483,12 @@ export class RVModel {
     this.lastSpeed = s.speed;
     const lat = (s.speed * s.speed * Math.tan(s.steer)) / WHEELBASE;
     const k = Math.min(1, dt * 6);
-    this.accelLocal.x += (-lat - this.accelLocal.x) * k; // centripetal accel points left (−x) on a left turn
-    this.accelLocal.z += (-a - this.accelLocal.z) * k; // forward accel is −z
+    // clamp to ~1.3 g: crashes/rams are delivered as explicit jolts, and frame hitches or
+    // instant speed changes must not turn into 1000 m/s² spikes that fling props through walls
+    const MAXA = 13;
+    const ac = THREE.MathUtils.clamp(a, -MAXA, MAXA), lc = THREE.MathUtils.clamp(lat, -MAXA, MAXA);
+    this.accelLocal.x += (-lc - this.accelLocal.x) * k; // centripetal accel points left (−x) on a left turn
+    this.accelLocal.z += (-ac - this.accelLocal.z) * k; // forward accel is −z
     this.pitch += (THREE.MathUtils.clamp(a * 0.006, -0.035, 0.035) - this.pitch) * k;
     this.roll += (THREE.MathUtils.clamp(-lat * 0.006, -0.04, 0.04) - this.roll) * k;
     const bump = Math.abs(s.speed) > 1 ? Math.sin(performance.now() * 0.023) * 0.0015 * Math.min(1, Math.abs(s.speed) / 20) : 0;

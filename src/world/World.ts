@@ -27,6 +27,20 @@ function lateral(z: number, off: number): [number, number] {
   return [roadX(z) + off / len, z - (dx * off) / len];
 }
 
+// ---------- clear zones: no desert props inside stop lots ----------
+interface ClearZone { x: number; z: number; yaw: number; x0: number; x1: number; z0: number; z1: number }
+const clearZones: ClearZone[] = [];
+/** Keep scenery out of a rectangle given in a stop's local frame (call before chunks are built). */
+export function addClearZone(zone: ClearZone) { clearZones.push(zone); }
+function cleared(wx: number, wz: number) {
+  for (const c of clearZones) {
+    const dx = wx - c.x, dz = wz - c.z; const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
+    const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+    if (lx > c.x0 && lx < c.x1 && lz > c.z0 && lz < c.z1) return true;
+  }
+  return false;
+}
+
 // ---------- hazards (deterministic per chunk so host & clients agree) ----------
 export interface Hazard { id: number; type: 'pothole' | 'debris'; x: number; z: number; r: number }
 const hazardCache = new Map<number, Hazard[]>();
@@ -53,6 +67,23 @@ export function chunkHazards(i: number): Hazard[] {
   hazardCache.set(i, h);
   return h;
 }
+/** Radar speed traps: one every few chunks on the right shoulder. Limit in MPH. */
+export const SPEED_LIMIT = 55;
+export interface Radar { id: number; x: number; z: number; yaw: number }
+export function chunkRadar(i: number): Radar | null {
+  if (i < 2 || i % 5 !== 3) return null;
+  const z = -i * CHUNK - CHUNK * 0.3;
+  const [x, zz] = lateral(z, 6.5);
+  if (cleared(x, zz)) return null;
+  return { id: i, x, z: zz, yaw: roadYaw(z) };
+}
+export function radarsNear(z: number): Radar[] {
+  const ci = Math.floor(-z / CHUNK);
+  return [chunkRadar(ci - 1), chunkRadar(ci), chunkRadar(ci + 1)].filter((r): r is Radar => !!r);
+}
+/** Road-relative coordinates: world point at distance `z` along the road and lateral offset `off` (+ = right). */
+export function roadPoint(z: number, off: number): [number, number] { return lateral(z, off); }
+
 export function hazardsNear(z: number): Hazard[] {
   const ci = Math.floor(-z / CHUNK);
   return [...chunkHazards(ci - 1), ...chunkHazards(ci), ...chunkHazards(ci + 1)];
@@ -136,6 +167,7 @@ export class World {
   private mats: Record<string, THREE.Material>;
   private geos: Record<string, THREE.BufferGeometry>;
   private signTex: THREE.Texture[];
+  private radarTex: THREE.Texture;
   private sunDir = new THREE.Vector3(0.3, 0.6, -0.4).normalize();
   /** 0 = night, 1 = full day */
   daylight = 1;
@@ -213,6 +245,16 @@ export class World {
       debris: new THREE.TorusGeometry(0.22, 0.06, 5, 8, Math.PI * 0.8),
     };
     this.signTex = BILLBOARDS.map((b) => signTexture(b.lines, b.bg, b.fg));
+    this.radarTex = (() => {
+      const c = document.createElement('canvas'); c.width = 128; c.height = 160;
+      const g = c.getContext('2d')!;
+      g.fillStyle = '#fff'; g.fillRect(0, 0, 128, 160); g.strokeStyle = '#111'; g.lineWidth = 6; g.strokeRect(5, 5, 118, 150);
+      g.fillStyle = '#111'; g.textAlign = 'center'; g.font = 'bold 20px Arial';
+      g.fillText('SPEED', 64, 32); g.fillText('LIMIT', 64, 56);
+      g.font = 'bold 62px Arial'; g.fillText(String(SPEED_LIMIT), 64, 116);
+      g.fillStyle = '#c62828'; g.font = 'bold 13px Arial'; g.fillText('RADAR ENFORCED', 64, 146);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+    })();
   }
 
   /** Stream chunks around focus, move sky/ground/sun, apply time of day. */
@@ -289,6 +331,7 @@ export class World {
       const side = r() < 0.5 ? -1 : 1;
       const off = side * (9 + Math.pow(r(), 1.6) * 140);
       const [x, zz] = lateral(z, off);
+      if (cleared(x, zz)) continue;
       const t = r();
       if (t < 0.25) place.saguaro.push(m4(x, 0, zz, 0.8 + r() * 0.7, r() * 6.28));
       else if (t < 0.4) place.barrel.push(m4(x, 0, zz, 0.7 + r() * 0.6, r() * 6.28));
@@ -304,6 +347,7 @@ export class World {
     }
     for (let z = z0 - (i * 7) % 60; z > z1; z -= 60) {
       const [x, zz] = lateral(z, 9.5);
+      if (cleared(x, zz)) continue;
       place.pole.push(m4(x, 0, zz, 1, -roadYaw(z)));
     }
     for (const [key, list] of Object.entries(place)) {
@@ -334,8 +378,25 @@ export class World {
       }
     }
 
+    // radar speed-trap sign
+    const radar = chunkRadar(i);
+    if (radar) {
+      const g = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 0.12).translate(0, 1.3, 0), this.mats.post);
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.4), new THREE.MeshStandardMaterial({ map: this.radarTex, roughness: 0.6 }));
+      plate.position.set(0, 2.5, 0.08);
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 0.3), this.mats.pothole); box.position.set(0, 1.6, 0.1);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.07, 12), new THREE.MeshStandardMaterial({ color: '#111', emissive: '#ff1744', emissiveIntensity: 1.5 }));
+      lens.position.set(0, 1.6, 0.26);
+      g.add(post, plate, box, lens);
+      g.position.set(radar.x, 0, radar.z);
+      g.rotation.y = radar.yaw; // face oncoming RV (+Z side of the sign faces back down the road)
+      disposables.push(post.geometry, plate.geometry);
+      group.add(g);
+    }
+
     // occasional billboard on the right side
-    if (i >= 0 && i % 3 === 1) {
+    if (i >= 0 && i % 3 === 1 && !cleared(...lateral(z0 - CHUNK * 0.5, 16))) {
       const z = z0 - CHUNK * 0.5;
       const [x, zz] = lateral(z, 16);
       const bb = new THREE.Group();
@@ -361,6 +422,7 @@ export class World {
     for (let mile = Math.ceil(-z0 / mPerMile); mile * mPerMile < -z1; mile++) {
       const z = -mile * mPerMile;
       const [x, zz] = lateral(z, 6.2);
+      if (cleared(x, zz)) continue;
       const post = new THREE.Mesh(this.geos.markerPost ?? (this.geos.markerPost = new THREE.BoxGeometry(0.08, 1.2, 0.08).translate(0, 0.6, 0)), this.mats.post);
       const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.5), new THREE.MeshStandardMaterial({ map: markerTex(mile), roughness: 0.7 }));
       disposables.push(plate.geometry);

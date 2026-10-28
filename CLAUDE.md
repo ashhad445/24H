@@ -172,7 +172,7 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 | | F / LMB | Use held item |
 | Driver seat | W / S | Throttle / brake |
 | | A / D | Steer |
-| | R / Shift ↑ · Q / Ctrl ↓ | Upshift / downshift |
+| | E ↑ · Q ↓ | Upshift / downshift (driver interacts with the mouse only) |
 | | Space | Handbrake toggle |
 | | H | Horn |
 | | Mouse + LMB | Click dash switches / key / shifter |
@@ -253,21 +253,44 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] Repairs: fuse back into fuse box (or duct tape), coolant / energy drink into radiator (front grille), spare tire onto flat (4 bolts, RV stopped) or duct tape, hammer / tape the hull for integrity
 - [x] HUD vitals (hunger, stamina, awake), held item, hazard badges, smoke overlay
 - Tests: `npx tsx scripts/sim-phase2.ts`, `npx tsx scripts/sim-hazards.ts`
-### Phase 3 — Rusty's Oasis: card, fuel, car wash, slots, crab derby, siphon, Cletus
-### Phase 4 — Traffic, Sheriff, Loan Shark, radar
+### Phase 3 — Rusty's Oasis (Mile 50)  ← **built, needs human playtest**
+- [x] Physical shared debit card (starts on the dash tray); must be held to pay. Overdraft allowed to −$100, then DECLINED. Ledger of every transaction (host) for the receipt
+- [x] Stop framework: stop-local layout (`stops/rusty.ts`), static colliders for players / props / RV (RV crashes into buildings), scenery clear-zones
+- [x] Pumps: swipe card → authorized; nozzle on a sagging hose (snaps back past 7 m); hold at the RV fuel port (rear-left) to pump $2.50/gal; live pump display; jerrycan fill
+- [x] General store: priced merchandise on display tables, checkout zone by the register (pay with the card), scratch-offs
+- [x] Cletus: alternates watching / reading the paper; unpaid items leaving the building = stolen (+1 heat if he's watching)
+- [x] Backroom: Lucky 777 slot (3 physical reels; pair = money back, triple $100, 777 $250), Crab Derby (bet $15 on Pinchy / Claws / Old Bay, winner pays $45)
+- [x] Car wash job: sponge + bucket (5 scrubs per dip), 8 mud splats × 2 scrubs → +$35, new car in 50 s
+- [x] Siphoning the stranger's SUV with the jerrycan (hold 3 s → +2 gal, 25% caught → +1 heat)
+- [x] Driver HUD gear readout (Q ▼ / E ▲, speed, rpm bar)
+- Deviations: siphon is hold-to-use instead of a timing-bar minigame; Cletus yells (+heat) instead of chasing — the chase lands with police in Phase 4
+- Dev: `?dev` + **F9** teleports the RV to Rusty's. Test: `npx tsx scripts/sim-phase3.ts`
+### Phase 4 — Highway Chaos  ← **built, needs human playtest**
+- [x] NPC traffic (sedans, pickups, campers) in both lanes, host-simulated in road coordinates: cruise, stopping-distance following, overtaking through the oncoming lane when clear, oncoming cars swerve + honk if the RV is in their lane
+- [x] RV vs traffic collisions (OBB): fender benders / head-ons → jolts, damage, wrecked NPC
+- [x] Radar speed traps (limit 55, ticketed above 60) every few chunks, deterministic like hazards → +1 heat
+- [x] Sheriff Roscoe: spawns ~25 s after heat > 0, chases with lights + siren, tails; stop the RV → he walks to the driver window → hand him the card = $50 (+$25 per extra heat, +$50 if you fled) and heat resets. Driving off mid-ticket = +2 heat and rams
+- [x] Loan Shark: matte-black spiked muscle car spawns ~12 s after the card goes negative, rams every 8–12 s (speed + yaw kick, jolt, −4 integrity), bullhorn threats; peels off once balance ≥ $0
+- [x] HUD warnings, siren audio, mirror shows pursuers
+- [x] Fix: cabin acceleration clamped to ~1.3 g and props can only leave through the open door (crashes used to fling everything through the walls)
+- Tests: `npx tsx scripts/sim-phase4.ts`, `npx tsx scripts/sim-containment.ts`
 ### Phase 5 — Forks, all stops, day/night, weather
 ### Phase 6 — Audio, radio, juice
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑10‑29 — Phase 4 built** (traffic, radar, Roscoe, Loan Shark).
+
+**2026‑10‑29 — Phase 3 built** (Rusty's Oasis). Food can now be restocked; money matters.
+
 **2026‑10‑28 — Phase 2 built** (checklist above). Hazard pacing at 55 MPH: ~6 pothole jolts, ~1 fuse pop, ~5% integrity per 3 min. Hunger 100→0 in 12 min, hypnosis 0→1 in 4 min (×0.6 solo). Food runs out without Phase 3 shops.
 
 **2026‑10‑28 — Phase 1 playable.**
 - `npm run dev` → open http://localhost:3000 (add `?dev` for debug readout + `window.game` hook). Second player: open another tab, join with the room code (or `?room=CODE`).
 - Headless drivetrain check: `npx tsx scripts/sim-drive.ts` (0–60 ≈ 18 s, ~38 compressed miles per 5 min at 60 MPH, ~5.7 gal per 5 min).
 - Host keeps simulating in background tabs (rAF loop + 100 ms watchdog with substeps). Chrome throttles hidden tabs to ~1 Hz timers, so long host alt-tabs still degrade; a Web Worker sim is the real fix (later).
-- Known gaps: no NPC traffic; road is flat (no potholes yet); drivers' input has one RTT of latency on clients (no prediction); seat prompt doesn't say who is sitting there.
+- Known gaps: road is flat (no potholes yet); drivers' input has one RTT of latency on clients (no prediction); seat prompt doesn't say who is sitting there.
 
 ## 24. Risks & Open Questions
 | Risk | Mitigation |

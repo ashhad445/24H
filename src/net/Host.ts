@@ -4,15 +4,27 @@ import { ItemSim } from '../items/ItemPhysics';
 import { KINDS, START_ITEMS, itemName } from '../items/Items';
 import { newRVState, shift, stepRV, type RVAux } from '../rv/Drivetrain';
 import type { Box2 } from '../rv/RV';
+import { obbHitsBox, toSetLocal } from '../stops/geom';
+import { PRICES, RUSTY_SET } from '../stops/rusty';
+import { RustySim, newRustyState, type StopHost } from '../stops/RustySim';
+import { TrafficSim } from '../traffic/TrafficSim';
 import { LANE_OFFSET, hazardsNear, roadX, roadYaw } from '../world/World';
 import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
 
 const WHEELS: [number, number][] = [[-RV.wheelX, RV.wheelFrontZ], [RV.wheelX, RV.wheelFrontZ], [-RV.wheelX, RV.wheelRearZ], [RV.wheelX, RV.wheelRearZ]];
 const FOOD_KINDS = new Set(Object.entries(KINDS).filter(([, k]) => k.food).map(([n]) => n));
 
-export class HostSim {
+export interface LedgerEntry { who: number; what: string; amount: number }
+
+export class HostSim implements StopHost {
   readonly s: SharedState;
   readonly items: ItemSim;
+  readonly rusty: RustySim;
+  readonly traffic: TrafficSim;
+  /** Every card transaction, for the end-of-run receipt. */
+  readonly ledger: LedgerEntry[] = [];
+  /** World position of a player's hand (set by main from poses). */
+  handOf: (id: number) => [number, number, number] | null = () => null;
   private aux: RVAux = { crankT: 0, lugT: 0, hornT: 0 };
   private drive: DriveInput = { th: 0, br: 0, st: 0, horn: false };
   private driveT = 0;
@@ -29,6 +41,10 @@ export class HostSim {
     this.s = {
       rv: newRVState(x, -LANE_OFFSET * Math.sin(yaw), yaw),
       cab: { stoveOn: false, fire: 0, smoke: 0, fuseOut: false, flat: -1, nuts: 0, brew: 0 },
+      rusty: newRustyState(),
+      npcs: [],
+      cop: { phase: 0, t: 0, fled: false },
+      shark: { on: false, t: 0 },
       items: [],
       crew: {},
       money: CFG.START_MONEY,
@@ -44,19 +60,52 @@ export class HostSim {
       else this.items.spawn(k, true, x, y, z);
     }
     this.items.spawn('spare', true, 0, 0, 0, 'rack');
+    this.items.spawn('card', true, 0, 0, 0, 'tray');
+    this.prevPose = { x: this.s.rv.x, z: this.s.rv.z, yaw: this.s.rv.yaw };
+    this.rusty = new RustySim(this);
+    this.traffic = new TrafficSim(this);
   }
 
-  private toast(text: string) { this.emit({ t: 'ev', k: 'toast', text }); }
-  private sfx(name: string) { this.emit({ t: 'ev', k: 'sfx', name }); }
+  /** World position of an item, following its holder when carried. */
+  itemWorld(it: ItemState): [number, number, number] | null {
+    if (it.h !== -1) return this.handOf(it.h);
+    if (!it.rv) return [it.x, it.y, it.z];
+    const r = this.s.rv; const c = Math.cos(r.yaw), sn = Math.sin(r.yaw);
+    return [r.x + it.x * c + it.z * sn, it.y, r.z - it.x * sn + it.z * c];
+  }
+
+  /** Spend from the shared card. Returns false (declined) past the overdraft limit. */
+  charge(from: number, amount: number, what: string): boolean {
+    const s = this.s;
+    if (s.money - amount < PRICES.overdraftLimit) { this.toast('💳 CARD DECLINED'); this.sfx('error'); return false; }
+    const before = s.money;
+    s.money -= amount;
+    const last = this.ledger[this.ledger.length - 1];
+    if (last && last.who === from && last.what === what) last.amount -= amount;
+    else this.ledger.push({ who: from, what, amount: -amount });
+    if (what !== 'Gas') this.sfx('cash');
+    if (before >= CFG.WEDDING_MIN_BALANCE && s.money < CFG.WEDDING_MIN_BALANCE) this.toast(`⚠️ Card is under $${CFG.WEDDING_MIN_BALANCE} — not enough for the wedding gift!`);
+    if (before >= 0 && s.money < 0) this.toast('🦈 OVERDRAWN. The Loan Shark has your number…');
+    return true;
+  }
+
+  credit(from: number, amount: number, what: string) {
+    this.s.money += amount;
+    this.ledger.push({ who: from, what, amount });
+    this.sfx('cash');
+  }
+
+  toast(text: string) { this.emit({ t: 'ev', k: 'toast', text }); }
+  sfx(name: string) { this.emit({ t: 'ev', k: 'sfx', name }); }
   private once(key: string, text: string) { if (!this.warned.has(key)) { this.warned.add(key); this.toast(text); } }
-  private name(id: number) { return this.names(id); }
+  name(id: number) { return this.names(id); }
   names: (id: number) => string = (id) => `Bean ${id}`;
 
   crew(id: number): CrewState {
     return (this.s.crew[id] ??= { hunger: 100, hypno: 0, caf: 0, spray: 0 });
   }
 
-  private held(id: number) { return this.s.items.find((i) => i.h === id); }
+  held(id: number) { return this.s.items.find((i) => i.h === id); }
 
   handle(from: number, m: GameMsg) {
     this.crew(from);
@@ -90,6 +139,8 @@ export class HostSim {
     const held = this.held(from);
 
     if (id.startsWith('item:')) return this.itemAct(from, held, Number(id.slice(5)));
+    if (this.rusty.act(from, id)) return;
+    if (id === 'roscoe') return this.traffic.payTicket(from);
     if (id.startsWith('player:')) return this.playerAct(from, held, Number(id.slice(7)));
 
     switch (id) {
@@ -131,7 +182,20 @@ export class HostSim {
       case 'coffeemaker':
         if (cab.brew <= 0) { cab.brew = SURV.BREW_TIME; this.sfx('click'); this.toast('☕ Coffee brewing…'); }
         break;
-      case 'self': if (held && FOOD_KINDS.has(held.k)) this.feed(from, from, held); else if (held?.k === 'patty') this.toast('Cook it first. Please.'); break;
+      case 'self':
+        if (held && FOOD_KINDS.has(held.k)) this.feed(from, from, held);
+        else if (held?.k === 'patty') this.toast('Cook it first. Please.');
+        else if (held?.k === 'scratch') this.scratch(from, held);
+        break;
+      case 'fuelport':
+        if (held?.k === 'nozzle') this.rusty.pumpInto(from, held);
+        else if (held?.k === 'jerrycan') {
+          if (held.d <= 0) { this.toast('Jerrycan is empty'); break; }
+          const gal = Math.min(held.d, CFG.FUEL_CAPACITY - rv.fuel);
+          rv.fuel += gal; held.d -= gal; this.sfx('pour');
+          this.toast(`⛽ Poured ${gal.toFixed(1)} gal into the tank`);
+        }
+        break;
       case 'spray':
         if (held?.k !== 'extinguisher' || held.d <= 0) break;
         held.d -= 1;
@@ -226,6 +290,15 @@ export class HostSim {
     this.toast(from === to ? `${this.name(from)} ate a ${what}` : `${this.name(from)} fed ${this.name(to)} a ${what}`);
   }
 
+  private scratch(from: number, it: ItemState) {
+    this.items.remove(it.id);
+    const roll = Math.random();
+    const win = roll < 0.05 ? 50 : roll < 0.25 ? 10 : 0;
+    this.sfx('scrub');
+    if (win) { this.credit(from, win, 'Scratch-off win'); this.toast(`🎟️ ${this.name(from)} scratched a WINNER: +$${win}!`); }
+    else this.toast(`🎟️ ${this.name(from)} scratched… nothing. "Better luck next time"`);
+  }
+
   private useUp(it: ItemState) {
     it.d -= 1;
     if (it.d <= 0) { this.items.remove(it.id); this.toast(`${KINDS[it.k].name} used up`); }
@@ -245,7 +318,7 @@ export class HostSim {
     else if (r === 'shift') this.sfx('shift');
   }
 
-  private joltAll(mag: number) {
+  joltAll(mag: number) {
     this.items.jolt(mag);
     this.emit({ t: 'ev', k: 'jolt', mag });
     this.s.rv.integrity = Math.max(0, this.s.rv.integrity - mag * 1.0);
@@ -256,6 +329,30 @@ export class HostSim {
       this.sfx('pop');
       this.toast('⚡ Fuse popped out! Lights & gauges dead');
     }
+  }
+
+  private prevPose = { x: 0, z: 0, yaw: 0 };
+  private crashCd = 0;
+  private collideStatics(dt: number) {
+    const rv = this.s.rv;
+    this.crashCd = Math.max(0, this.crashCd - dt);
+    // RV footprint: center between nose and rear, in RV-local z
+    const midZ = (RV.noseZ + RV.zRear) / 2, hl = (RV.zRear - RV.noseZ) / 2;
+    for (const set of [RUSTY_SET]) {
+      if (Math.abs(rv.x - set.x) > 150 || Math.abs(rv.z - set.z) > 150) continue;
+      const c = Math.cos(rv.yaw), sn = Math.sin(rv.yaw);
+      const [cx, cz] = toSetLocal(set, rv.x + midZ * sn, rv.z + midZ * c);
+      const yaw = rv.yaw - set.yaw;
+      if (set.boxes.some((b) => obbHitsBox(cx, cz, yaw, RV.halfW, hl, b))) {
+        // undo the move and bounce
+        const sp = Math.abs(rv.speed);
+        rv.x = this.prevPose.x; rv.z = this.prevPose.z; rv.yaw = this.prevPose.yaw;
+        rv.speed *= -0.15;
+        if (sp > 2 && this.crashCd <= 0) { this.crashCd = 0.6; this.sfx('bang'); this.joltAll(Math.min(1.5, sp / 12)); this.toast('💥 CRUNCH'); }
+        return;
+      }
+    }
+    this.prevPose = { x: rv.x, z: rv.z, yaw: rv.yaw };
   }
 
   step(dt: number, accel: { x: number; z: number } = { x: 0, z: 0 }) {
@@ -319,8 +416,13 @@ export class HostSim {
       }
     }
 
+    // ---------- stop buildings: the RV can't drive through them ----------
+    this.collideStatics(dt);
+
     // ---------- props ----------
     this.items.step(dt, accel);
+    this.rusty.step(dt);
+    this.traffic.step(dt);
 
     // ---------- galley ----------
     const pan = s.items.find((i) => i.s === 'skillet');

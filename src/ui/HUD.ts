@@ -1,5 +1,5 @@
 // Minimal diegetic-first HUD: clock, odometer, card balance, reticle, prompts, toasts.
-import { CFG } from '../config';
+import { CFG, ENGINE, gearInfo } from '../config';
 import type { SharedState, SeatRole } from '../types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -15,6 +15,7 @@ export class HUD {
     reticle: $('reticle'), prompt: $('prompt'), hints: $('hints'), toasts: $('toasts'), tab: $('tab'), end: $('end'),
     clickToPlay: $('click-to-play'), dev: $('dev'),
     hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), held: $('v-held'),
+    gearbox: $('gearbox'), gear: $('g-gear'), gspeed: $('g-speed'), grpm: $('g-rpm'),
     smoke: $('fx-smoke'), hangry: $('fx-hangry'), lidTop: $('fx-lid-top'), lidBot: $('fx-lid-bot'),
   };
 
@@ -42,8 +43,22 @@ export class HUD {
     if (s.rv.steam) badges.push('🌡️ Overheating');
     if (s.rv.fuel < 3) badges.push('⛽ Low fuel');
     if (s.rv.ignition === 0 && s.seats.driver !== -1) badges.push('🔑 Engine off');
-    if (s.heat > 0) badges.push('🚔 Heat');
+    if (s.shark.on) badges.push('🦈 LOAN SHARK — get the card above $0!');
+    if (s.cop.phase === 1 || s.cop.phase === 2) badges.push('🚔 Roscoe on your tail — stop to pull over');
+    else if (s.cop.phase === 3) badges.push('🤠 Roscoe at the driver window — hand him the card');
+    else if (s.heat > 0) badges.push(`🚔 Heat ${s.heat}`);
     this.el.badges.textContent = badges.join('  ');
+
+    // gear readout for the driver
+    this.el.gearbox.classList.toggle('hidden', opts.seat !== 'driver');
+    if (opts.seat === 'driver') {
+      const on = s.rv.ignition === 2;
+      this.el.gear.textContent = on ? gearInfo(s.rv.gear).name : s.rv.ignition === 1 ? '…' : 'OFF';
+      this.el.gear.classList.toggle('off', !on);
+      this.el.gear.classList.toggle('rev', on && s.rv.gear === -1);
+      this.el.gspeed.textContent = `${Math.round(Math.abs(s.rv.speed) * CFG.MPH)} mph`;
+      this.el.grpm.style.width = `${Math.min(100, (s.rv.rpm / ENGINE.REDLINE) * 100)}%`;
+    }
 
     // vitals & screen effects
     const me = s.crew[opts.myId];
@@ -67,7 +82,7 @@ export class HUD {
     this.el.prompt.classList.toggle('hidden', !opts.prompt);
 
     this.el.hints.textContent = opts.seat === 'driver'
-      ? 'W/S throttle·brake   A/D steer   R/Q shift up·down   Space handbrake   H horn   Click dash   F stand'
+      ? 'W/S throttle·brake   A/D steer   E/Q shift up·down   Space handbrake   H horn   Click dash   F stand'
       : opts.seat === 'nav'
         ? 'Mouse look   Click dash   F stand'
         : opts.held

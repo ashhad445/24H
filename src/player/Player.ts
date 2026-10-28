@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { PLAYER, RV } from '../config';
 import type { Input } from '../core/Input';
 import { RVModel, SEATS, SEAT_EYE } from '../rv/RV';
+import { collideCircle, fromSetLocal, toSetLocal, type StaticSet } from '../stops/geom';
 import type { DriveInput, Pose, SeatRole, SharedState } from '../types';
 
 const insideBounds = (x: number, z: number) => Math.abs(x) < RV.innerHalfW + 0.04 && z > RV.zFront && z < RV.zRear - 0.04;
@@ -20,6 +21,8 @@ export class Player {
   private tired = false;
   private bob = 0;
   private shake = 0;
+  /** Static buildings to collide with when outside the RV. */
+  statics: StaticSet[] = [];
 
   constructor(private camera: THREE.PerspectiveCamera, private rv: RVModel, private scene: THREE.Scene) {
     rv.body.add(camera);
@@ -123,7 +126,20 @@ export class Player {
     const inside = insideBounds(l.x, l.z);
 
     // floor
-    const floor = inside ? RV.floorY : 0;
+    let floor = inside ? RV.floorY : 0;
+    if (!this.inRV && !inside) {
+      // stop buildings (walls, counters, cars) in world space
+      let [wx, wz] = [this.pos.x, this.pos.z];
+      { const w = this.toWorld(l.x, l.z); wx = w.x; wz = w.z; }
+      for (const set of this.statics) {
+        if (Math.abs(wx - set.x) > 200 || Math.abs(wz - set.z) > 200) continue;
+        const [sx, sz] = toSetLocal(set, wx, wz);
+        const res = collideCircle(sx, sz, PLAYER.radius, this.pos.y, set.boxes, 0.3);
+        [wx, wz] = fromSetLocal(set, res.x, res.z);
+        floor = Math.max(floor, res.floor);
+      }
+      l = this.toLocal(wx, wz);
+    }
     if (this.pos.y <= floor + 0.001) {
       if (floor - this.pos.y <= PLAYER.stepUp || this.vel.y <= 0) { this.pos.y = floor; this.vel.y = Math.max(0, this.vel.y); this.onGround = true; }
     } else if (this.pos.y > floor + 0.05) this.onGround = false;

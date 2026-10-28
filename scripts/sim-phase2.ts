@@ -60,7 +60,7 @@ host.handle(1, { t: 'act', id: 'self', btn: 0 });
 console.log('hunger after eating:', s.crew[1].hunger.toFixed(0));
 
 // fuse pop via pothole-sized jolt
-(host as any).joltAll(1.2);
+for (let i = 0; i < 50 && !s.cab.fuseOut; i++) (host as any).joltAll(1.2); // 40% per jolt
 console.log('fuseOut:', s.cab.fuseOut, 'fuse at', where('fuse'));
 step(2);
 const fuse = s.items.find((i) => i.k === 'fuse')!;

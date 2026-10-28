@@ -2,6 +2,7 @@
 // the RV's acceleration as a pseudo-force, so braking flings the burgers forward.
 import { RV } from '../config';
 import type { Box2 } from '../rv/RV';
+import { collideCircle, fromSetLocal, toSetLocal, type StaticSet } from '../stops/geom';
 import type { ItemState, SharedState } from '../types';
 import { KINDS } from './Items';
 
@@ -9,6 +10,7 @@ export const SLOTS: Record<string, [number, number, number]> = {
   skillet: [1.0, 1.648, 0.53],
   rack: [-0.4, 1.2, RV.zRear + 0.24],
   wall: [1.24, 1.15, -0.7],
+  tray: [0.65, 1.475, -2.82],
 };
 
 const insideBounds = (x: number, z: number) => Math.abs(x) < RV.innerHalfW + 0.04 && z > RV.zFront && z < RV.zRear - 0.04;
@@ -16,14 +18,18 @@ const insideBounds = (x: number, z: number) => Math.abs(x) < RV.innerHalfW + 0.0
 export class ItemSim {
   private vel = new Map<number, [number, number, number]>();
   private nextId = 1;
+  /** World-space slots (e.g. pump holsters at a stop). */
+  readonly worldSlots = new Map<string, [number, number, number]>();
+  /** Static collision sets for world-frame items (stop buildings, shelves). */
+  statics: StaticSet[] = [];
 
   constructor(private s: SharedState, private colliders: (doorOpen: boolean) => Box2[]) {}
 
   get(id: number) { return this.s.items.find((i) => i.id === id); }
 
-  spawn(k: string, rv: boolean, x: number, y: number, z: number, slot = '', d?: number): ItemState {
-    const it: ItemState = { id: this.nextId++, k, rv, x, y, z, ry: Math.random() * 6.28, h: -1, s: slot, d: d ?? KINDS[k]?.uses ?? 0 };
-    if (slot) [it.x, it.y, it.z] = SLOTS[slot];
+  spawn(k: string, rv: boolean, x: number, y: number, z: number, slot = '', d?: number, price = 0): ItemState {
+    const it: ItemState = { id: this.nextId++, k, rv, x, y, z, ry: Math.random() * 6.28, h: -1, s: slot, d: d ?? KINDS[k]?.uses ?? 0, p: price };
+    if (slot) this.placeInSlot(it);
     this.s.items.push(it);
     this.vel.set(it.id, [0, 0, 0]);
     return it;
@@ -35,6 +41,13 @@ export class ItemSim {
   }
 
   setVel(id: number, v: [number, number, number]) { this.vel.set(id, v); }
+
+  private placeInSlot(it: ItemState) {
+    const rvSlot = SLOTS[it.s];
+    if (rvSlot) { [it.x, it.y, it.z] = rvSlot; it.rv = true; return; }
+    const w = this.worldSlots.get(it.s);
+    if (w) { [it.x, it.y, it.z] = w; it.rv = false; }
+  }
 
   /** Kick every loose item inside the RV upward (pothole) — mag 0..1.5. */
   jolt(mag: number) {
@@ -61,13 +74,17 @@ export class ItemSim {
     const cols = this.colliders(rv.doorOpen);
     for (const it of this.s.items) {
       if (it.h !== -1) continue;
-      if (it.s) { [it.x, it.y, it.z] = SLOTS[it.s]; it.rv = true; continue; }
+      if (it.s) { this.placeInSlot(it); continue; }
       const v = this.vel.get(it.id) ?? [0, 0, 0];
       this.vel.set(it.id, v);
       const r = KINDS[it.k]?.r ?? 0.05;
 
       if (it.rv) { v[0] -= accel.x * dt; v[2] -= accel.z * dt; }
       v[1] -= 16 * dt;
+      // cap speed so a prop can never skip across a wall in one step
+      const sp = Math.hypot(v[0], v[1], v[2]);
+      if (it.rv && sp > 10) { v[0] *= 10 / sp; v[1] *= 10 / sp; v[2] *= 10 / sp; }
+      const wasInside = it.rv && insideBounds(it.x, it.z);
       it.x += v[0] * dt; it.y += v[1] * dt; it.z += v[2] * dt;
 
       // collide in RV-local space
@@ -96,6 +113,20 @@ export class ItemSim {
       }
       if (insideBounds(lx, lz) && it.y + r > RV.ceilY) { it.y = RV.ceilY - r; v[1] = Math.min(0, v[1]); }
 
+      // stop buildings, shelves and counters (world-frame items only)
+      if (!it.rv) {
+        const [wx, wz] = this.toWorld(lx, lz);
+        for (const set of this.statics) {
+          if (Math.abs(wx - set.x) > 200 || Math.abs(wz - set.z) > 200) continue;
+          const [sx, sz] = toSetLocal(set, wx, wz);
+          const res = collideCircle(sx, sz, r, it.y - r, set.boxes);
+          if (res.x !== sx || res.z !== sz) { v[0] *= -0.3; v[2] *= -0.3; }
+          const [nx, nz] = fromSetLocal(set, res.x, res.z);
+          [lx, lz] = this.toLocal(nx, nz);
+          floor = Math.max(floor, res.floor);
+        }
+      }
+
       // floor / surface
       if (it.y - r <= floor) {
         it.y = floor + r;
@@ -105,7 +136,17 @@ export class ItemSim {
       }
 
       // write back + frame transitions
-      const inside = insideBounds(lx, lz);
+      let inside = insideBounds(lx, lz);
+      // props only leave the cabin through the open door; anything else bounces back in
+      if (wasInside && !inside) {
+        const viaDoor = rv.doorOpen && lx > 0 && lz > RV.doorZ0 && lz < RV.doorZ1 && it.y < RV.doorTop;
+        if (!viaDoor) {
+          lx = Math.max(-RV.innerHalfW + r, Math.min(RV.innerHalfW - r, lx));
+          lz = Math.max(RV.zFront + r, Math.min(RV.zRear - 0.08 - r, lz));
+          v[0] *= -0.3; v[2] *= -0.3;
+          inside = true;
+        }
+      }
       if (it.rv) {
         it.x = lx; it.z = lz;
         if (!inside) {

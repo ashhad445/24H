@@ -19,6 +19,12 @@ export class ItemViews {
     private myId: number,
   ) {}
 
+  /** Current rendered world position of an item, or null if it has no view. */
+  worldPosOf(id: number): THREE.Vector3 | null {
+    const v = this.views.get(id);
+    return v && v.parent ? v.obj.getWorldPosition(new THREE.Vector3()) : null;
+  }
+
   sync(items: ItemState[], dt: number) {
     const seen = new Set<number>();
     for (const it of items) {

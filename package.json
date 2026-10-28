@@ -9,7 +9,8 @@
     "relay": "tsx server/relay.ts",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "start": "tsx server/relay.ts"
+    "start": "tsx server/relay.ts",
+    "share": "npm run build && tsx scripts/share.ts"
   },
   "dependencies": {
     "three": "^0.170.0",

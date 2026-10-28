@@ -35,7 +35,8 @@ export interface ItemState {
   ry: number; // yaw (visual)
   h: number; // holder peer id, −1 = none
   s: string; // slot: '' | 'skillet' | 'rack'
-  d: number; // patty: cook progress · tools: uses left
+  d: number; // patty: cook progress · tools: uses left · jerrycan: gallons · sponge: suds
+  p: number; // unpaid store price in $ (0 = paid / not merchandise)
 }
 
 export interface CrewState {
@@ -55,8 +56,34 @@ export interface CabinState {
   brew: number; // seconds left brewing coffee, 0 = idle
 }
 
+/** Rusty's Oasis (Mile 50) live state. */
+export interface RustyState {
+  pumps: { auth: number; gal: number; cost: number }[]; // auth = seconds the pump stays authorized
+  slot: { res: number[]; left: number; spins: number }; // left = seconds of spin animation remaining
+  derby: { phase: 0 | 1 | 2; t: number; pos: number[]; bets: [number, number][]; winner: number }; // 0 idle, 1 betting, 2 racing
+  wash: { dirt: number[]; away: number }; // dirt per splat (0–2), seconds until the next dirty car
+  cletus: { watch: boolean; t: number };
+}
+
+/** NPC vehicle (traffic, Sheriff Roscoe, the Loan Shark). World space. */
+export interface NPCState {
+  id: number;
+  k: 'sedan' | 'pickup' | 'camper' | 'cop' | 'shark';
+  x: number; z: number; yaw: number;
+  speed: number;
+  c: number; // paint color index (traffic)
+  w: number; // wrecked seconds left (0 = fine)
+}
+
+/** Police: 0 none, 1 chasing, 2 tailing, 3 pulled over (Roscoe at the window), 4 leaving. */
+export interface CopState { phase: 0 | 1 | 2 | 3 | 4; t: number; fled: boolean }
+
 export interface SharedState {
   rv: RVState;
+  npcs: NPCState[];
+  cop: CopState;
+  shark: { on: boolean; t: number };
+  rusty: RustyState;
   cab: CabinState;
   items: ItemState[];
   crew: Record<string, CrewState>;
