@@ -1,0 +1,129 @@
+// Host-only lightweight prop physics. Items inside the RV simulate in RV-local space and feel
+// the RV's acceleration as a pseudo-force, so braking flings the burgers forward.
+import { RV } from '../config';
+import type { Box2 } from '../rv/RV';
+import type { ItemState, SharedState } from '../types';
+import { KINDS } from './Items';
+
+export const SLOTS: Record<string, [number, number, number]> = {
+  skillet: [1.0, 1.648, 0.53],
+  rack: [-0.4, 1.2, RV.zRear + 0.24],
+  wall: [1.24, 1.15, -0.7],
+};
+
+const insideBounds = (x: number, z: number) => Math.abs(x) < RV.innerHalfW + 0.04 && z > RV.zFront && z < RV.zRear - 0.04;
+
+export class ItemSim {
+  private vel = new Map<number, [number, number, number]>();
+  private nextId = 1;
+
+  constructor(private s: SharedState, private colliders: (doorOpen: boolean) => Box2[]) {}
+
+  get(id: number) { return this.s.items.find((i) => i.id === id); }
+
+  spawn(k: string, rv: boolean, x: number, y: number, z: number, slot = '', d?: number): ItemState {
+    const it: ItemState = { id: this.nextId++, k, rv, x, y, z, ry: Math.random() * 6.28, h: -1, s: slot, d: d ?? KINDS[k]?.uses ?? 0 };
+    if (slot) [it.x, it.y, it.z] = SLOTS[slot];
+    this.s.items.push(it);
+    this.vel.set(it.id, [0, 0, 0]);
+    return it;
+  }
+
+  remove(id: number) {
+    this.s.items = this.s.items.filter((i) => i.id !== id);
+    this.vel.delete(id);
+  }
+
+  setVel(id: number, v: [number, number, number]) { this.vel.set(id, v); }
+
+  /** Kick every loose item inside the RV upward (pothole) — mag 0..1.5. */
+  jolt(mag: number) {
+    for (const it of this.s.items) {
+      if (!it.rv || it.h !== -1 || it.s) continue;
+      const v = this.vel.get(it.id)!;
+      v[1] += mag * (1.6 + Math.random() * 1.6);
+      v[0] += (Math.random() - 0.5) * mag * 1.5;
+      v[2] += (Math.random() - 0.5) * mag * 1.5;
+    }
+  }
+
+  private toLocal(wx: number, wz: number) {
+    const r = this.s.rv; const dx = wx - r.x, dz = wz - r.z; const c = Math.cos(r.yaw), s = Math.sin(r.yaw);
+    return [dx * c - dz * s, dx * s + dz * c] as const;
+  }
+  private toWorld(lx: number, lz: number) {
+    const r = this.s.rv; const c = Math.cos(r.yaw), s = Math.sin(r.yaw);
+    return [r.x + lx * c + lz * s, r.z - lx * s + lz * c] as const;
+  }
+
+  step(dt: number, accel: { x: number; z: number }) {
+    const rv = this.s.rv;
+    const cols = this.colliders(rv.doorOpen);
+    for (const it of this.s.items) {
+      if (it.h !== -1) continue;
+      if (it.s) { [it.x, it.y, it.z] = SLOTS[it.s]; it.rv = true; continue; }
+      const v = this.vel.get(it.id) ?? [0, 0, 0];
+      this.vel.set(it.id, v);
+      const r = KINDS[it.k]?.r ?? 0.05;
+
+      if (it.rv) { v[0] -= accel.x * dt; v[2] -= accel.z * dt; }
+      v[1] -= 16 * dt;
+      it.x += v[0] * dt; it.y += v[1] * dt; it.z += v[2] * dt;
+
+      // collide in RV-local space
+      let [lx, lz] = it.rv ? [it.x, it.z] : this.toLocal(it.x, it.z);
+      let floor = insideBounds(lx, lz) ? RV.floorY : 0;
+      if (it.y < RV.roofY + 0.3) {
+        for (const b of cols) {
+          const top = b.top ?? 99;
+          const over = lx > b.x0 && lx < b.x1 && lz > b.z0 && lz < b.z1;
+          if (over && it.y - r >= top - 0.12) { floor = Math.max(floor, top); continue; }
+          if (it.y - r >= top - 0.12) continue;
+          const cx = Math.min(b.x1, Math.max(b.x0, lx)), cz = Math.min(b.z1, Math.max(b.z0, lz));
+          let dx = lx - cx, dz = lz - cz; const d2 = dx * dx + dz * dz;
+          if (d2 >= r * r) continue;
+          if (d2 < 1e-8) {
+            const px = Math.min(lx - b.x0, b.x1 - lx), pz = Math.min(lz - b.z0, b.z1 - lz);
+            if (px < pz) { lx = lx - b.x0 < b.x1 - lx ? b.x0 - r : b.x1 + r; v[0] *= -0.3; }
+            else { lz = lz - b.z0 < b.z1 - lz ? b.z0 - r : b.z1 + r; v[2] *= -0.3; }
+          } else {
+            const d = Math.sqrt(d2); dx /= d; dz /= d;
+            lx = cx + dx * r; lz = cz + dz * r;
+            // reflect the velocity component into the wall (local frame for rv items)
+            if (it.rv) { const vn = v[0] * dx + v[2] * dz; if (vn < 0) { v[0] -= 1.3 * vn * dx; v[2] -= 1.3 * vn * dz; } }
+          }
+        }
+      }
+      if (insideBounds(lx, lz) && it.y + r > RV.ceilY) { it.y = RV.ceilY - r; v[1] = Math.min(0, v[1]); }
+
+      // floor / surface
+      if (it.y - r <= floor) {
+        it.y = floor + r;
+        if (v[1] < 0) v[1] = v[1] < -1.5 ? -v[1] * 0.3 : 0;
+        const fr = Math.max(0, 1 - dt * 6);
+        v[0] *= fr; v[2] *= fr;
+      }
+
+      // write back + frame transitions
+      const inside = insideBounds(lx, lz);
+      if (it.rv) {
+        it.x = lx; it.z = lz;
+        if (!inside) {
+          // left the RV through the door: carry the RV's velocity into the world
+          const [wx, wz] = this.toWorld(lx, lz); const c = Math.cos(rv.yaw), sn = Math.sin(rv.yaw);
+          const vx = v[0] * c + v[2] * sn - Math.sin(rv.yaw) * rv.speed, vz = -v[0] * sn + v[2] * c - Math.cos(rv.yaw) * rv.speed;
+          it.x = wx; it.z = wz; v[0] = vx; v[2] = vz; it.rv = false;
+        }
+      } else {
+        const [wx, wz] = this.toWorld(lx, lz); it.x = wx; it.z = wz;
+        if (inside && it.y >= RV.floorY - 0.05) {
+          const c = Math.cos(rv.yaw), sn = Math.sin(rv.yaw);
+          const vx = v[0] + Math.sin(rv.yaw) * rv.speed, vz = v[2] + Math.cos(rv.yaw) * rv.speed;
+          it.x = lx; it.z = lz; v[0] = vx * c - vz * sn; v[2] = vx * sn + vz * c; it.rv = true;
+        }
+      }
+      // items far behind the RV are lost forever
+      if (!it.rv && Math.hypot(it.x - rv.x, it.z - rv.z) > 600) this.remove(it.id);
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# One-click deploy on Render (render.com → New → Blueprint → pick this repo).
+# One Node web service serves the built game AND the multiplayer relay on the same URL.
+services:
+  - type: web
+    name: roadtrip-roulette
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health

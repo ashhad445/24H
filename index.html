@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roadtrip Roulette</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="lobby">
+      <div class="card">
+        <h1>🚐 Roadtrip Roulette</h1>
+        <p class="sub">24 hours. $200. One beater RV. Show up to the wedding with at least $100 left.</p>
+        <label>Your name <input id="l-name" maxlength="16" /></label>
+        <div class="row">
+          <button id="l-host" class="primary">Host game</button>
+          <button id="l-solo">Play solo</button>
+        </div>
+        <div class="row">
+          <input id="l-code" placeholder="ROOM" maxlength="4" />
+          <button id="l-join">Join</button>
+        </div>
+        <details>
+          <summary>Server</summary>
+          <input id="l-server" />
+        </details>
+        <p id="l-status"></p>
+      </div>
+    </div>
+
+    <div id="fx-smoke"></div>
+    <div id="fx-hangry"></div>
+    <div id="fx-lid-top" class="lid"></div>
+    <div id="fx-lid-bot" class="lid"></div>
+    <div id="hud" class="hidden">
+      <div id="stats">
+        <div id="h-wedding"></div>
+        <div id="h-time"></div>
+        <div id="h-miles"></div>
+        <div id="h-money"></div>
+        <div id="h-badges"></div>
+      </div>
+      <div id="reticle"></div>
+      <div id="prompt" class="hidden"></div>
+      <div id="vitals">
+        <div class="bar"><span>🍔</span><i><b id="v-hunger"></b></i></div>
+        <div class="bar"><span>⚡</span><i><b id="v-stam"></b></i></div>
+        <div class="bar" id="v-awake-row"><span>😴</span><i><b id="v-awake"></b></i></div>
+        <div id="v-held"></div>
+      </div>
+      <div id="hints"></div>
+      <div id="toasts"></div>
+      <div id="tab" class="hidden"></div>
+      <div id="click-to-play">Click to play</div>
+      <div id="end" class="hidden"><h1></h1><p>Refresh to play again.</p></div>
+      <pre id="dev" class="hidden"></pre>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

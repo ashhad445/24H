@@ -1,0 +1,280 @@
+# 🚐 Roadtrip Roulette — Master Game Plan (CLAUDE.md)
+
+> **Pitch:** *How to Fish* meets *The Long Drive*. 1–4 friends have **24 hours** and a **shared $200 debit card** to drive an absolute beater of an RV across a procedural desert to a Vegas wedding — and they must show up with **at least $100 left on the card** for the wedding gift.
+
+| | |
+| :--- | :--- |
+| **Genre** | Chill‑to‑Chaos co‑op physics comedy / shared‑wallet roguelite roadtrip |
+| **Players** | 1–4 online co‑op (host‑authoritative). Multiplayer is core, not a late add‑on |
+| **Perspective** | First‑person, physical "bean" avatars with 3D hands |
+| **Inspirations** | *Gamble With Your Friends*, *How to Fish*, *Bombanana*, *The Long Drive*, *RV There Yet*, *Lethal Company* |
+| **Platform** | Browser build for dev & playtests → PC (Steam) via Electron + steamworks.js |
+| **Stack** | **Three.js + TypeScript + Vite** client · **Node + `ws`** relay server |
+| **Session length** | One run ≈ 60 real minutes (24 in‑game hours) |
+
+---
+
+## 0. Engineering Rules (read first)
+
+- **Run:** `npm run dev` starts the Vite client (port 3000) **and** the relay server (port 3001). `npm run typecheck` = `tsc --noEmit`.
+- **Verify every change** with `npm run typecheck` and a live browser check. Open two tabs to test multiplayer.
+- **Conventions:** right‑handed, +Y up, **−Z forward**. Units = meters / seconds. RV local space: origin at floor center, −Z toward the cab.
+- **Single source of truth** for networked state: `GameState` on the host. Clients never mutate shared state directly; they send *intents* (`interact`, `grab`, `drive input`) to the host.
+- **Diegetic UI.** No 2D buttons for vehicle controls / minigames. Debug tools only behind `?dev` URL flag.
+- **No asset 404s.** Everything starts procedural; real `.glb` models get swapped in through `AssetLoader` later.
+- **One phase at a time.** Don't start Phase N+1 until Phase N is fun.
+- Keep modules small; one system per file in `src/<area>/`.
+
+---
+
+## 1. Revisions vs. the original plan (2026‑10‑28)
+
+| # | Original | Revised | Why |
+| :- | :--- | :--- | :--- |
+| 1 | 48 in‑game hours | **24 in‑game hours** (1 real s = 24 game s → 60 real min) | Brief: "24 h to reach the wedding" |
+| 2 | Win = reach chapel in time | Win = reach chapel in time **AND card balance ≥ $100** (wedding gift). Arrive broke = "Showed Up Empty‑Handed" fail ending | Brief: minimum balance. Makes every gamble/purchase a real decision |
+| 3 | Distances literal (250 mi) | **Compressed miles:** odometer miles = world meters × `MILE_SCALE`. A leg ≈ 6–9 real minutes of driving | 250 literal miles at 60 MPH = 4 real hours of driving |
+| 4 | Route mileage inconsistent (Mile 42 stop, Mile 140 fork, "I‑95") | Fixed 5‑leg route (see §10). LA→Vegas is **I‑15**, not I‑95 | Consistency |
+| 5 | Networking in Phase 7 | **Networking skeleton in Phase 1.** Every system is written host‑authoritative from day one | Retrofitting netcode onto a physics game is the #1 project killer |
+| 6 | WebRTC / Steam P2P | Browser: **WebSocket relay** (`server/`, rooms with 4‑letter codes). Transport behind an interface so Steam P2P can replace it | Simplest thing that works on LAN + internet |
+| 7 | Rapier for everything | **Arcade kinematic RV** (custom bicycle model) + **custom lightweight prop physics** in RV-local space (`items/ItemPhysics.ts`: gravity, surfaces, walls, inertial pseudo-force). No Rapier | Hand-tuned feel, tiny net snapshots, no WASM, no jitter at speed. Revisit Rapier only if tumbling/stacking becomes a core need |
+| 8 | Avatars sync fully on host | **Each client owns its own avatar pose** (sent in RV‑local space at 20 Hz). Host owns RV, props, economy, NPCs | Responsive movement, no input lag on walking |
+| 9 | Kenney + custom GLBs already exist | **Start procedural**; import Kenney CC0 / Blender models later | Starting from scratch |
+| 10 | Solo AI co‑pilot | Solo play allowed; difficulty eases (slower hunger, fewer breakdowns) when 1 player | Keep solo viable without AI work |
+
+---
+
+## 2. Core Concept & Fantasy
+
+Your friend is getting married in Vegas in **24 hours**. The crew pooled **$200** on one physical debit card and rented the cheapest RV on the lot — a smoking 1980s Class‑C with a manual gearbox, sticky wipers, and a fuse box that pops if you look at it wrong.
+
+**Everything is manual and physical:**
+- One person **drives** (stick shift, handbrake, ignition key, wipers, lights).
+- One **navigates** with a giant paper map that blows around if the door is open.
+- Someone **cooks questionable gas‑station meat** in the back to keep the driver fed and awake.
+- Someone **duct‑tapes the RV back together** mid‑drive.
+
+When the money runs low, you pull into bizarre roadside stops — rigged slots, crab racing, scratch‑offs, siphoning gas — to fund the next 50 miles. But spend too much and you show up to the wedding with no gift.
+
+## 3. Design Pillars
+1. **Everything Is Physical.** Look at a switch, click it. Hold the card to pay. Carry the nozzle to the tank.
+2. **Chill‑to‑Chaos.** Calm highway stretches punctuated by stacked disasters.
+3. **Shared Wallet, Shared Blame.** One card, one balance, one receipt at the end assigning blame.
+4. **Everyone Always Has a Job.** Driver, navigator, cook, mechanic.
+5. **Friendship‑Ruining Comedy.** Physics, proximity voice, dumb decisions.
+6. **One Phase at a Time.**
+
+## 4. Core Loop
+```
+Highway Leg (drive · cook · navigate · repair)
+   → Y‑Fork (pick exit on paper map)
+   → Roadside Stop (spend: fuel/food/parts · earn: jobs/gambling/crime)
+   → Card balance check (< $0 → Loan Shark hunts you)
+   → next leg …
+   → Mile 250 Chapel: before 24:00 and balance ≥ $100 → WIN
+```
+Lose: clock hits 24:00 · RV destroyed · stranded (no fuel, no money) · arrive with < $100.
+
+## 5. Player Roles
+| Role | Jobs | Failure |
+| :--- | :--- | :--- |
+| 🚗 Driver | Steer, throttle, H‑shifter R/N/1–5, handbrake, ignition, wipers, lights, horn | Crashes, stalls, overheating, hypnosis swerves |
+| 🗺️ Navigator | Map, call exits, spot speed traps, radio | Wrong exit → longer route, more heat |
+| 🍳 Cook | Fry patties, assemble burgers, feed driver, coffee, fight grease fires | Hangry / hypnotised driver, smoke |
+| 🔧 Mechanic | Fuses, radiator, flat tires, refuel, duct tape | Lights out, steam, RV pulls sideways |
+
+## 6. The Beater RV
+1980s Class‑C. Cream `#f4efe6`, orange `#f0ad4e` / maroon `#d9534f` stripes. **2.8 m wide × 7.0 m long** (incl. cab nose), cabin floor y = 0.65 above ground.
+
+**Interior (front → back):** Cockpit (driver seat left, navigator right, wheel, woodgrain dash with 4 analog gauges + gear LED, ignition, lights/wiper switches, radio, card tray, map) · floor console (H‑shifter, handbrake) · overcab loft · right‑side entry door · dinette · galley (stove + skillet, sink, fridge, extinguisher) · rear (fuse box, tools, rear window).
+
+**Exterior:** chrome bumpers, headlights (real spotlights), clearance lights, mirrors, roof AC, ladder, spare tire, left fuel port, 4 wheels that steer and spin.
+
+## 7. Driving & Vehicle Systems
+| System | Spec |
+| :--- | :--- |
+| Transmission | `R N 1 2 3 4 5`. Top speeds R −16, 1:18, 2:34, 3:52, 4:70, 5:90 MPH. Lugging below band, redline above |
+| RPM | 0 off, ~820 idle, ~6200 limit |
+| Ignition | Physical key; must be ON. Stalls if lugging hard in high gear at low speed |
+| Handbrake | Physical lever |
+| Fuel | 25 gal; burns with throttle × RPM. Empty → coast |
+| Radiator | Rises under load; > 235 °F → steam, power loss |
+| Windshield grime | Accumulates; 3D wipers clear it |
+| Jolts | Potholes / rams inject Δv impulses into cabin props and players |
+| Integrity | 0–100; collisions reduce; hammer / duct tape repair |
+
+## 8. Passenger Jobs
+- **Cooking:** raw → cooked → burnt (>135%) → grease fire. Extinguisher. Plate assembly (patty + bun + cheese). Hand‑feed driver.
+- **Driver survival:** Hunger (hangry red pulse + throttle wobble), Road Hypnosis (vignette + micro‑swerves; cured by coffee/energy drink/slap/horn).
+- **Repairs:** Popped fuse (jolt ≥ 0.8) · overheated radiator (coolant jug) · flat tire (spare + lug wrench) · damage (hammer / duct tape).
+
+## 9. Shared Debit Card Economy
+- One physical card, **$200 start**, lives on the dash tray. Must be **held** to pay. Can be dropped / lost.
+- Every transaction logged with *who* did it (for the receipt).
+- **Overdraft (< $0)** → Loan Shark hunts the RV until balance ≥ $0.
+- **Wedding gift minimum: $100** at the chapel (`WEDDING_MIN_BALANCE`, tunable).
+
+| Action | Cost / Payout |
+| :--- | :--- |
+| Fuel | $2.50 / gal |
+| Energy soda | −$4 → +25 stamina, +20 hunger |
+| Burger kit (patty+bun+cheese) | −$6 |
+| Scratch‑off | −$5 → 1:4 win $10, 1:20 win $50 |
+| Lucky 777 slot | −$5 → pair +$15, triple +$100 |
+| Crab Derby | −$15 → win +$45 (1 in 3) |
+| Car wash job | +$35 |
+| Diner burger‑flip shift | +$40 (costs ~1.5 in‑game h) |
+| Pawn your stuff | +$10–60 per prop |
+| Police ticket | −$50 |
+| Siphon gas | Free +2 gal, 25% spotted (+1 heat) |
+| Shoplift | Free if clerk isn't looking |
+
+## 10. World & Route (revised)
+250 compressed miles of procedural desert, LA → Vegas. Two‑lane highway along −Z. Endless chunk streaming. Each leg ends at a physical **Y‑fork** with overhead signs matching the paper map.
+
+| Leg | Miles | Content |
+| :- | :--- | :--- |
+| 0 | 0 | **Rental Lot** — tutorial: grab keys & card, learn controls, leave the lot |
+| 1 | 0 → 50 | Route 66 desert → **Rusty's Oasis Gas & Slots** (pumps, car wash, store w/ Cletus, backroom slots, crab derby, siphon target SUV) |
+| 2 | 50 → 120 | **Fork A:** *I‑15 (smooth, +20 mi)* → **Lucky Scorpion Diner** (cheap food, burger‑flip job, jukebox) **vs** *Dead Man's Canyon (rough, −15 mi, rockfalls, no gas)* → **Canyon Junkyard** (pawn props, spare parts) |
+| 3 | 120 → 190 | **Fork B:** **Roadside Motel** (sleep to restore stamina but lose time, ice machine) **vs** **Rusty Cactus Casino** (blackjack, roulette, high‑roller slots, bouncer) |
+| 4 | 190 → 230 | Radar zones & Sheriff Roscoe heavy stretch → **Last Chance Gas** (expensive fuel $4/gal, pawn shop) |
+| 5 | 230 → 250 | Vegas outskirts, traffic → **Desert Wedding Chapel** — drive through the arch |
+
+**Time / weather:** clock drives sun (06:00 start → night → next morning). Headlights needed at night. Sandstorms & crosswinds on leg 2/4.
+
+## 11. Side‑Hustles
+- **Honest:** car wash (sponge, bucket, 8 splatters), burger flipping, fixing a local's car.
+- **Fueling:** swipe card at pump → carry nozzle on stretchy hose to rear‑left fuel port → squeeze. Jerrycan for manual carry.
+- **Gambling:** 3‑reel physical slots, Crab Derby (Pinchy / Claws / Old Bay), scratch‑offs, blackjack & roulette (casino).
+- **Crime:** siphon timing bar (Suck → Pinch → Fill), shoplifting while Cletus isn't looking, lawn‑flamingo theft → heat.
+
+## 12. Highway Chaos
+| Threat | Trigger | Behaviour | Resolution |
+| :--- | :--- | :--- | :--- |
+| NPC traffic | Always | Sedans, pickups, campers both lanes | Drive well |
+| Sheriff Roscoe | Heat > 0 | Lights + siren, tails, boxes in | Outrun to exit or pay $50 |
+| Loan Shark | Balance < $0 | Matte‑black V8, rams / PIT | Balance ≥ $0 |
+
+## 13. Characters
+Crew (bean avatars, hats) · Groom (texts increasingly panicked messages to the radio/phone) · Rusty · Old Man Cletus · Sheriff Roscoe · Loan Shark · Tourist · Crabs Pinchy, Claws, Old Bay.
+
+## 14. Items
+Debit card · paper map · raw patty / bun / cheese / burger · soda / energy drink / coffee · fire extinguisher · fuse · duct tape · hammer · coolant jug · spare tire + lug wrench · fuel nozzle · jerrycan + siphon · sponge · scratch‑off · lawn flamingo.
+
+## 15. Controls
+| Context | Input | Action |
+| :--- | :--- | :--- |
+| On foot | WASD / Shift / Space | Walk / sprint / jump |
+| | Mouse | Look |
+| | E / LMB | Interact with 3D object / sit |
+| | G | Drop held item |
+| | F / LMB | Use held item |
+| Driver seat | W / S | Throttle / brake |
+| | A / D | Steer |
+| | R / Shift ↑ · Q / Ctrl ↓ | Upshift / downshift |
+| | Space | Handbrake toggle |
+| | H | Horn |
+| | Mouse + LMB | Click dash switches / key / shifter |
+| | F | Stand up |
+| Any | Tab | Player list / room code |
+| | Esc | Release mouse / pause menu |
+
+## 16. HUD (diegetic first)
+Center reticle + context prompt · top‑left clock (countdown to 24:00), odometer, card balance (crimson if < $100 gift line, flashing if < $0), hazard badges · bottom‑left vitals + held item · bottom‑center key hints · top‑right toasts · Tab: room code & players.
+
+## 17. Audio
+Procedural Web Audio first (engine RPM loop, horn, clicks, cash chime, sizzle, siren). Real audio files later. Radio stations. 3D proximity voice (WebRTC, Phase 7), muffled through RV walls.
+
+## 18. Multiplayer Architecture
+- **Relay server** (`server/relay.ts`, Node `ws`): rooms keyed by 4‑letter code, max 4 peers, first peer = host. Pure relay — no game logic.
+- **Host** runs the authoritative simulation: RV physics + controls, world, props, economy, NPCs, clock. Broadcasts **snapshots at 20 Hz** + reliable **events** (toasts, transactions, sounds).
+- **Clients** send: own avatar pose (RV‑local or world, 20 Hz), driver inputs when seated as driver, interaction intents (`interact <id>`, `grab <id>`, `drop`). Clients interpolate snapshots (~100 ms buffer).
+- **Seats** are host‑assigned (one driver at a time).
+- Host migration: not supported (host leaves → run ends) — documented limitation.
+- Transport interface `NetTransport` → swap `WebSocketTransport` for `SteamTransport` later.
+
+## 18b. Hosting
+- **Production = one Node service**: `npm run build` then `npm start`. `server/relay.ts` serves `dist/` over HTTP and the WebSocket relay on the same port (`PORT` env). The lobby auto-targets `wss://<same host>`; on Vite dev (:3000) it targets `ws://host:3001`.
+- **Render**: `render.yaml` blueprint (free plan sleeps after ~15 min idle → ~50 s cold start). Railway / Fly.io work the same way (build + start command, needs WebSocket support). Static-only hosts (Netlify, GitHub Pages, itch.io) can serve the client, but the relay must run somewhere that supports WebSockets.
+- Health check: `GET /health`. Server pings sockets every 25 s so proxies don't drop idle connections.
+
+## 19. Win / Lose & Meta
+- **Win:** through the chapel arch at Mile 250 before 24:00 with balance ≥ $100.
+- **Endings:** *Just Married* (win) · *Missed It* (time) · *Empty‑Handed* (arrived broke) · *Totaled* (RV destroyed) · *Stranded*.
+- **Receipt & Blame Board:** money lost at slots per player, burgers cooked/burnt, cars washed vs siphoned, fuses popped, final gift.
+- **Unlocks (post‑MVP):** RV variants, paint, hats.
+
+## 20. Technical Architecture
+```
+E:\24H
+├── CLAUDE.md            ← this file
+├── index.html
+├── package.json / tsconfig.json / vite.config.ts
+├── server/relay.ts      ← WebSocket room relay
+└── src/
+    ├── main.ts          ← boot, lobby, game loop
+    ├── config.ts        ← all tuning constants
+    ├── types.ts
+    ├── core/   Input.ts · GameState.ts · Sound.ts · Clock.ts
+    ├── net/    Net.ts (transport + host/client roles) · protocol.ts
+    ├── rv/     RV.ts (hull, interior, dash) · Drivetrain.ts
+    ├── world/  World.ts (sky, light, terrain, road chunks) · stops/*.ts
+    ├── player/ Player.ts (local FP controller) · Avatar.ts (remote beans)
+    └── ui/     HUD.ts · Lobby.ts
+```
+
+## 21. Art Direction
+Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping, soft shadows. Procedural meshes first; Kenney CC0 packs + Blender (`blender-mcp` available) to replace.
+
+## 22. Roadmap
+> Golden rule: polish one phase before starting the next.
+
+### Phase 1 — RV Cabin, Driving Feel & Netcode Skeleton  ← **current**
+- [x] Vite + TS + Three.js scaffold, relay server, lobby (host / join by code / solo)
+- [x] Desert highway with chunk streaming, sky, lighting, time-of-day sun
+- [x] RV hull + interior, walkable while moving (RV‑local transport), door, inertial jolts on players
+- [x] Driver & navigator seats (E sit / F stand)
+- [x] Manual drivetrain R/N/1–5, RPM, fuel, temp, stall, grind; ignition, handbrake, horn, wipers, lights, dome, radio
+- [x] 4 analog gauges + gear LED, clickable 3D dash, live rear-view mirror
+- [x] Remote bean avatars + RV snapshot sync (20 Hz, 100 ms interpolation)
+- [x] Clock (24 h) + odometer + HUD
+- [ ] Human playtest of the gate below (feel tuning: steering, jolt strength, gauge size)
+- **Gate:** two players in one RV; one drives through gears, the other walks around the cabin at 70 MPH without jitter.
+
+### Phase 2 — Cooking, Survival & Repairs  ← **built, needs human playtest**
+- [x] Host-authoritative items (19 props + spare): grab (E), drop (G), throw (RMB), held in hand, synced
+- [x] Prop physics in RV-local space: surfaces, walls, braking flings, pothole bounces, items can fly out the door
+- [x] Galley: burner knob, skillet, cook raw → cooked (35 s) → burnt → grease fire; extinguisher (hold LMB) puts it out; coffee maker (20 s brew)
+- [x] Burger assembly: patty + bun → burger (raw/burnt variants), + cheese → cheeseburger
+- [x] Eat (LMB) or hand-feed another player (look at them + E). Hunger, stamina, caffeine
+- [x] Driver hangry (throttle wobble + red pulse) and road hypnosis (eyelids + swerves, asleep at 100%). Cures: coffee, energy drink, horn, slap
+- [x] Road hazards: potholes (jolts, damage, fuse pops), tire debris (blowouts). Deterministic per chunk
+- [x] Repairs: fuse back into fuse box (or duct tape), coolant / energy drink into radiator (front grille), spare tire onto flat (4 bolts, RV stopped) or duct tape, hammer / tape the hull for integrity
+- [x] HUD vitals (hunger, stamina, awake), held item, hazard badges, smoke overlay
+- Tests: `npx tsx scripts/sim-phase2.ts`, `npx tsx scripts/sim-hazards.ts`
+### Phase 3 — Rusty's Oasis: card, fuel, car wash, slots, crab derby, siphon, Cletus
+### Phase 4 — Traffic, Sheriff, Loan Shark, radar
+### Phase 5 — Forks, all stops, day/night, weather
+### Phase 6 — Audio, radio, juice
+### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
+### Phase 8 — Chapel finale, receipt, Electron + Steam
+
+## 23. Current Build Status
+**2026‑10‑28 — Phase 2 built** (checklist above). Hazard pacing at 55 MPH: ~6 pothole jolts, ~1 fuse pop, ~5% integrity per 3 min. Hunger 100→0 in 12 min, hypnosis 0→1 in 4 min (×0.6 solo). Food runs out without Phase 3 shops.
+
+**2026‑10‑28 — Phase 1 playable.**
+- `npm run dev` → open http://localhost:3000 (add `?dev` for debug readout + `window.game` hook). Second player: open another tab, join with the room code (or `?room=CODE`).
+- Headless drivetrain check: `npx tsx scripts/sim-drive.ts` (0–60 ≈ 18 s, ~38 compressed miles per 5 min at 60 MPH, ~5.7 gal per 5 min).
+- Host keeps simulating in background tabs (rAF loop + 100 ms watchdog with substeps). Chrome throttles hidden tabs to ~1 Hz timers, so long host alt-tabs still degrade; a Web Worker sim is the real fix (later).
+- Known gaps: no NPC traffic; road is flat (no potholes yet); drivers' input has one RTT of latency on clients (no prediction); seat prompt doesn't say who is sitting there.
+
+## 24. Risks & Open Questions
+| Risk | Mitigation |
+| :--- | :--- |
+| Physics jitter in a fast RV | RV‑local interior simulation |
+| Netcode with many props | Host‑authoritative, sync only active props, interpolate |
+| Browser → Steam | Electron + steamworks.js, test in Phase 7 |
+| Scope creep | Phase gates; ship with 3–4 stop types |
+
+Open: final name? · exact `WEDDING_MIN_BALANCE` ($100?) · monetisation · solo AI helper?
