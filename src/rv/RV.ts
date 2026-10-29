@@ -6,6 +6,9 @@ import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
 import { RVPolish } from './RVPolish';
 import { CHARM2_QUOTES, CHARM_QUOTES } from './charmQuotes';
+import { KINDS, buildItemMesh, itemName } from '../items/Items';
+
+const RV_FRIDGE_SHELVES = [0.95, 1.4];
 
 export interface PromptCtx { held: string; cab: CabinState }
 export interface Interactable { id: string; obj: THREE.Object3D; prompt: (s: RVState, c: PromptCtx) => string }
@@ -99,6 +102,10 @@ export class RVModel {
   private fireGroup!: THREE.Group;
   private fireLight!: PoolLight;
   private brewLamp!: THREE.MeshStandardMaterial;
+  private fridgeDoor!: THREE.Group;
+  private fridgeStock = new THREE.Group();
+  private fridgeBox = { x: 0, z0: 0, z1: 0 };
+  private fridgeKey = '';
   private rearHatch = new THREE.Group();
   private nosLeds: THREE.MeshStandardMaterial[] = [];
   private nosFlame = new THREE.Group();
@@ -433,8 +440,32 @@ export class RVModel {
     this.box(M.wood, 0.95, innerHalfW, 2.25, 2.95, -0.3, 2.3); // upper cabinets
     this.colliders.push({ x0: 0.68, x1: innerHalfW, z0: -0.34, z1: 2.32, top: 1.55 });
     // fridge (left rear)
-    this.box(M.lining, -innerHalfW, -0.7, floorY, 2.6, 2.45, zRear - wallT);
-    this.box(M.steel, -0.72, -0.69, 1.4, 2.0, 2.55, 2.6);
+    // hollow cabinet: lit inside, two wire shelves, solid top section, door that swings out when used
+    const fz0 = 2.45, fz1 = zRear - wallT, fTop = 1.85;
+    this.box(M.lining, -innerHalfW, -0.7, floorY, floorY + 0.12, fz0, fz1); // base
+    this.box(M.lining, -innerHalfW, -0.7, fTop, 2.6, fz0, fz1); // top section
+    this.box(M.lining, -innerHalfW, -0.7, floorY, fTop, fz0, fz0 + 0.03); // sides
+    this.box(M.lining, -innerHalfW, -0.7, floorY, fTop, fz1 - 0.03, fz1);
+    this.box(new THREE.MeshStandardMaterial({ color: '#e3f2fd', emissive: '#bbdefb', emissiveIntensity: 0.7 }), -innerHalfW, -innerHalfW + 0.02, floorY + 0.12, fTop, fz0, fz1);
+    for (const y of RV_FRIDGE_SHELVES) this.box(M.steel, -innerHalfW, -0.72, y - 0.012, y, fz0 + 0.03, fz1 - 0.03);
+    this.fridgeBox = { x: (-innerHalfW - 0.7) / 2, z0: fz0 + 0.1, z1: fz1 - 0.1 };
+    this.body.add(this.fridgeStock);
+    this.fridgeDoor = new THREE.Group(); this.fridgeDoor.position.set(-0.69, 0, fz0 + 0.01); this.body.add(this.fridgeDoor);
+    const fdoor = new THREE.Mesh(new THREE.BoxGeometry(0.04, fTop - floorY - 0.02, fz1 - fz0 - 0.02), M.lining);
+    fdoor.position.set(0, (floorY + fTop) / 2, (fz1 - fz0 - 0.02) / 2); fdoor.castShadow = true;
+    const fh = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 0.05), M.steel); fh.position.set(0.03, 1.35, fz1 - fz0 - 0.14);
+    this.fridgeDoor.add(fdoor, fh);
+    // invisible panel across the opening, so the open fridge (and what's in it) is clickable too
+    const fHit = new THREE.Mesh(new THREE.BoxGeometry(0.02, fTop - floorY - 0.15, fz1 - fz0 - 0.08), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+    fHit.position.set(-0.74, (floorY + fTop) / 2, (fz0 + fz1) / 2); this.body.add(fHit);
+    fHit.userData.iid = 'fridge';
+    this.reg('fridge', this.fridgeDoor, (_s, c) => {
+      const items = c.cab.fridge ?? [];
+      if (c.held) return KINDS[c.held]?.food || c.held === 'patty' ? `Put it in the fridge (${items.length}/8)` : '';
+      if (!items.length) return 'RV fridge (empty) — put food & drinks in here';
+      const last = items[items.length - 1];
+      return `Take the ${itemName(last[0], last[1])} from the fridge (${items.length} inside)`;
+    });
     this.colliders.push({ x0: -innerHalfW, x1: -0.68, z0: 2.43, z1: zRear, top: 2.6 });
     // rear wheel arch colliders
     this.colliders.push({ x0: -innerHalfW, x1: -innerHalfW + 0.42, z0: RV.wheelRearZ - 0.57, z1: RV.wheelRearZ + 0.57, top: 1.05 });
@@ -651,6 +682,20 @@ export class RVModel {
     this.fuseLamp.emissiveIntensity = power ? 1 : 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
     this.stoveKnob.rotation.x = cab.stoveOn ? 1.2 : 0;
     this.brewLamp.emissiveIntensity = cab.brew > 0 ? 2 : 0;
+    this.fridgeDoor.rotation.y += ((cab.fridgeT > 0 ? 1.7 : 0) - this.fridgeDoor.rotation.y) * Math.min(1, dt * 7);
+    const fk = (cab.fridge ?? []).map((f) => f[0]).join(',');
+    if (fk !== this.fridgeKey) { // what's inside, 4 per shelf
+      this.fridgeKey = fk;
+      this.fridgeStock.clear();
+      const fb = this.fridgeBox;
+      (cab.fridge ?? []).forEach(([k], i) => {
+        const m = buildItemMesh(k);
+        const y = RV_FRIDGE_SHELVES[Math.floor(i / 4) % RV_FRIDGE_SHELVES.length];
+        m.position.set(fb.x, y + (KINDS[k]?.r ?? 0.05), fb.z0 + ((i % 4) + 0.5) * ((fb.z1 - fb.z0) / 4));
+        m.traverse((o) => { o.userData.iid = 'fridge'; });
+        this.fridgeStock.add(m);
+      });
+    }
     this.fireGroup.visible = cab.fire > 0;
     if (cab.fire > 0) {
       const t = performance.now() * 0.001;

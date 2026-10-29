@@ -18,6 +18,8 @@ export class Player {
   seat: SeatRole = '';
   onGround = true;
   stamina = 100;
+  /** caffeine sprint buzz: seconds left, sprint drain ×, refill × */
+  boost = { t: 0, drain: 1, regen: 1 };
   private tired = false;
   private bob = 0;
   private shake = 0;
@@ -90,7 +92,9 @@ export class Player {
     if (this.stamina <= 0) this.tired = true;
     if (this.stamina > 25) this.tired = false;
     const sprinting = input.down('ShiftLeft') && moving && !this.tired;
-    this.stamina = Math.max(0, Math.min(100, this.stamina + (sprinting ? -PLAYER.sprintDrain : PLAYER.sprintRegen) * dt));
+    const bz = this.boost.t > 0 ? this.boost : { drain: 1, regen: 1 };
+    this.boost.t = Math.max(0, this.boost.t - dt);
+    this.stamina = Math.max(0, Math.min(100, this.stamina + (sprinting ? -PLAYER.sprintDrain * bz.drain : PLAYER.sprintRegen * bz.regen) * dt));
     const speed = sprinting ? PLAYER.sprint : PLAYER.walk;
     const accel = this.onGround ? 14 : 2;
     const k = Math.min(1, accel * dt);
@@ -210,6 +214,13 @@ export class Player {
 
   /** Camera pitch nudge (gear change, brake slam). + = look down. */
   kick(amount: number) { this.kickV -= amount * 12; }
+
+  /** Caffeine buzz. A stronger buzz replaces a weaker one; the same kind just tops up the time. */
+  addBoost(t: number, drain: number, regen: number) {
+    const b = this.boost;
+    if (b.t <= 0 || drain <= b.drain) { b.drain = drain; b.regen = regen; b.t = Math.max(b.t, t); }
+    else b.t = Math.max(b.t, t * 0.5); // weaker drink on top of a strong one: extends a little
+  }
 
   /** Pothole / crash: bounce the player if they're standing in the RV, shake everyone inside. */
   jolt(mag: number) {

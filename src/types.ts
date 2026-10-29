@@ -69,6 +69,8 @@ export interface CabinState {
   flat: number; // wheel index with a flat, −1 = none (0 FL, 1 FR, 2 RL, 3 RR)
   nuts: number; // lug nuts done on the flat
   brew: number; // seconds left brewing coffee, 0 = idle
+  fridge: [string, number][]; // RV fridge contents (kind, d), last in = first out
+  fridgeT: number; // seconds the fridge door stays open (visual)
 }
 
 /** Rusty's Oasis (Mile 50) live state. */
@@ -149,6 +151,6 @@ export type GameMsg =
   | { t: 'ev'; k: 'emote'; who: number; what: 'slap' | 'eat' | 'wave' }
   | { t: 'ev'; k: 'jolt'; mag: number }
   | { t: 'ev'; k: 'fade'; to: number; dur: number; ko?: boolean } // ko = knocked out (bat / taser), not Tammy
-  | { t: 'ev'; k: 'fed'; to: number; stam: number }
+  | { t: 'ev'; k: 'fed'; to: number; stam: number; boost?: [number, number, number] } // boost: seconds, sprint drain ×, refill ×
   | { t: 'ev'; k: 'puke'; to: number }
   | { t: 'ev'; k: 'wake'; to: number }; // passed out: wake up on the RV floor

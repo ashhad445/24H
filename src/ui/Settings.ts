@@ -1,12 +1,12 @@
-// Pause-menu settings: volume mixer + mouse sensitivity, saved per browser.
+// Pause-menu settings: volume mixer, mouse sensitivity and field of view, saved per browser.
 import { DEFAULT_VOLUMES, type Sound, type Volumes } from '../core/Sound';
 import type { Input } from '../core/Input';
 
-interface Saved extends Volumes { sens: number }
+interface Saved extends Volumes { sens: number; fov: number }
 const KEY = 'rr-settings';
 
 export function setupSettings(sound: Sound, input: Input) {
-  let saved: Saved = { ...DEFAULT_VOLUMES, sens: input.sensitivity };
+  let saved: Saved = { ...DEFAULT_VOLUMES, sens: input.sensitivity, fov: 75 };
   try { saved = { ...saved, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { /* storage blocked */ }
 
   const apply = () => {
@@ -28,7 +28,8 @@ export function setupSettings(sound: Sound, input: Input) {
   bind('v-effects', 'effects', pct);
   bind('v-radio', 'radio', pct);
   bind('v-sens', 'sens', (v) => (v / 0.0022).toFixed(1) + '×');
+  bind('v-fov', 'fov', (v) => `${Math.round(v)}°`);
   document.getElementById('p-resume')!.addEventListener('click', () => { sound.init(); apply(); input.lock(); });
   apply();
-  return { reapply: apply };
+  return { reapply: apply, get fov() { return saved.fov; } };
 }

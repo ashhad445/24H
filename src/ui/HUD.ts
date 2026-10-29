@@ -2,8 +2,8 @@
 import { CFG, ENGINE, NOS, gearInfo } from '../config';
 import { SPEED_LIMIT } from '../world/World';
 import { progressMiles, totalMiles } from '../world/Route';
-import { itemName } from '../items/Items';
-import type { SharedState, SeatRole } from '../types';
+import { KINDS, itemIcon, itemName } from '../items/Items';
+import type { ItemState, SharedState, SeatRole } from '../types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -18,7 +18,7 @@ export class HUD {
     phone: $('phone'), radioCap: $('radio-cap'), hurt: $('fx-hurt'), speedFx: $('fx-speed'), nosFx: $('fx-nos'), flash: $('fx-flash'), black: $('fx-black'), camWarn: $('cam-warn'), nos: $('g-nos'),
     reticle: $('reticle'), prompt: $('prompt'), hints: $('hints'), toasts: $('toasts'), tab: $('tab'), end: $('end'),
     pause: $('pause'), room: $('p-room'), dev: $('dev'),
-    hp: $('v-hp'), puke: $('fx-puke'), hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), held: $('v-held'),
+    hp: $('v-hp'), puke: $('fx-puke'), hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), buzz: $('v-buzz'), hbName: $('hb-name'),
     gearbox: $('gearbox'), gear: $('g-gear'), gspeed: $('g-speed'), grpm: $('g-rpm'),
     smoke: $('fx-smoke'), hangry: $('fx-hangry'), lidTop: $('fx-lid-top'), lidBot: $('fx-lid-bot'),
   };
@@ -32,6 +32,10 @@ export class HUD {
   private blackT = 0;
   private nosA = 0;
   private capT = 0;
+  private slots = [...document.querySelectorAll<HTMLElement>('#hotbar .hb-slot')];
+  private slotKeys = ['', '', ''];
+  private selKey = '';
+  private nameT = 0;
   /** The groom's latest texts (shown on Tab). */
   readonly texts: string[] = [];
 
@@ -123,7 +127,7 @@ export class HUD {
     this.flyEl.textContent = `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)}`;
   }
 
-  update(s: SharedState, opts: { prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; dev: string; myId: number; stamina: number; held: string; inRV: boolean; dt: number; cam: number | null }) {
+  update(s: SharedState, opts: { prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
     const remaining = Math.max(0, CFG.RUN_HOURS * 3600 - s.clock);
     const tod = CFG.START_HOUR * 3600 + s.clock;
     const day = Math.floor(tod / 86400) + 1;
@@ -183,11 +187,13 @@ export class HUD {
     this.el.hunger.style.width = `${hunger}%`;
     this.el.hunger.classList.toggle('low', hunger < 25);
     this.el.stam.style.width = `${opts.stamina}%`;
+    const buzz = opts.boost.t > 0;
+    this.el.stam.classList.toggle('buzz', buzz);
+    this.el.buzz.textContent = buzz ? `${opts.boost.drain <= 0.5 ? '☕' : '⚡'} ${Math.floor(opts.boost.t / 60)}:${String(Math.floor(opts.boost.t % 60)).padStart(2, '0')}` : '';
     const driving = opts.seat === 'driver';
     this.el.awakeRow.classList.toggle('hidden', !driving && hypno < 0.05);
     this.el.awake.style.width = `${(1 - hypno) * 100}%`;
-    const sl = me?.slot ?? 0;
-    this.el.held.textContent = [0, 1, 2].map((n) => { const it = s.items.find((i) => i.h === opts.myId && i.sl === n); return `${n === sl ? '▶' : ' '}${n + 1}:${it ? itemName(it.k, it.d) : '—'}`; }).join('   ');
+    this.hotbar(s, me?.slot ?? 0, opts.myId, opts.dt);
     this.el.smoke.style.opacity = String(opts.inRV ? s.cab.smoke * 0.75 : 0);
     const t = performance.now() / 1000;
     this.el.hangry.style.opacity = hunger < 25 ? String(0.35 + 0.35 * Math.sin(t * 4)) : '0';
@@ -220,6 +226,35 @@ export class HUD {
 
     this.el.dev.classList.toggle('hidden', !opts.dev);
     if (opts.dev) this.el.dev.textContent = opts.dev;
+  }
+
+  /** Three pockets, bottom center. The held item's name pops up above when it changes. */
+  private hotbar(s: SharedState, sel: number, myId: number, dt: number) {
+    let selItem: ItemState | undefined;
+    for (let n = 0; n < 3; n++) {
+      const it = s.items.find((i) => i.h === myId && i.sl === n);
+      if (n === sel) selItem = it;
+      const el = this.slots[n];
+      const key = it ? `${it.id}:${it.k}:${Math.round(it.d * 10)}:${it.p}` : '';
+      el.classList.toggle('sel', n === sel);
+      if (key === this.slotKeys[n]) continue;
+      this.slotKeys[n] = key;
+      const kind = it ? KINDS[it.k] : undefined;
+      const count = !it ? '' : it.k === 'jerrycan' ? it.d.toFixed(1) : it.k === 'sponge' ? (it.d > 0 ? String(it.d) : '')
+        : kind?.uses && kind.uses > 1 && it.k !== 'extinguisher' ? String(it.d) : '';
+      el.querySelector('.hb-icon')!.textContent = it ? itemIcon(it.k) : '';
+      el.querySelector('.hb-count')!.textContent = count;
+      el.querySelector('.hb-price')!.textContent = it && it.p > 0 ? `$${it.p % 1 ? it.p.toFixed(2) : it.p}` : '';
+      el.title = it ? itemName(it.k, it.d) : '';
+    }
+    const k = `${sel}:${selItem?.id ?? ''}`;
+    if (k !== this.selKey) {
+      this.selKey = k;
+      this.nameT = selItem ? 2.2 : 0;
+      if (selItem) this.el.hbName.textContent = itemName(selItem.k, selItem.d) + (selItem.p > 0 ? ` — $${selItem.p.toFixed(2)} unpaid` : '');
+    }
+    this.nameT = Math.max(0, this.nameT - dt);
+    this.el.hbName.classList.toggle('show', this.nameT > 0);
   }
 
   toast(text: string) {

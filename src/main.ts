@@ -152,7 +152,7 @@ async function start() {
       if (m.ko) { heist.cancel(); player.stamina = Math.max(0, player.stamina - 30); }
       else { sound.play('kiss'); player.stamina = Math.min(player.stamina, 25); }
     }
-    else if (m.k === 'fed' && m.to === net.myId) player.stamina = Math.min(100, Math.max(0, player.stamina + m.stam));
+    else if (m.k === 'fed' && m.to === net.myId) { player.stamina = Math.min(100, Math.max(0, player.stamina + m.stam)); if (m.boost) player.addBoost(...m.boost); }
     else if (m.k === 'puke' && m.to === net.myId) { hud.puke(); hud.hurt(0.3); }
     else if (m.k === 'wake' && m.to === net.myId) setTimeout(() => player.wakeInRV(), 2500); // moved while the screen is black
   };
@@ -255,7 +255,8 @@ async function start() {
     } else hud.toast('Empty hands to strip it, or a jerrycan to siphon');
   };
   const fireWorld = new THREE.Vector3();
-  let lastGear = 0, lastHP = 100, fov = 75;
+  let lastGear = 0, lastHP = 100, fov = settings.fov;
+  camera.fov = fov; camera.updateProjectionMatrix();
   const camRight = new THREE.Vector3();
 
   /** What the reticle is on: an interactable id, plus whether it's bare RV hull. */
@@ -458,7 +459,7 @@ async function start() {
 
     // ---------- juice ----------
     // speed widens the view a touch; the cabin rumbles with the engine and the road
-    const targetFov = 75 + (player.inRV ? Math.min(1, Math.max(0, (mph - 40) / 160)) * 14 + (r.nosT > 0 ? 9 : 0) : 0);
+    const targetFov = settings.fov + (player.inRV ? Math.min(1, Math.max(0, (mph - 40) / 160)) * 14 + (r.nosT > 0 ? 9 : 0) : 0);
     if (Math.abs(targetFov - fov) > 0.01) {
       fov += (targetFov - fov) * Math.min(1, dt * 2);
       camera.fov = fov; camera.updateProjectionMatrix();
@@ -481,7 +482,7 @@ async function start() {
     hud.update(shared, {
       prompt: look.prompt,
       seat: player.seat, locked: input.locked, tab: input.down('Tab'), room: net.solo ? 'SOLO' : net.code, players,
-      dt, cam: camAhead ? r.z - camAhead.z : null, myId: net.myId, stamina: player.stamina, held: held ? itemName(held.k, held.d) : '', inRV: player.inRV,
+      dt, cam: camAhead ? r.z - camAhead.z : null, myId: net.myId, stamina: player.stamina, boost: player.boost, held: held ? itemName(held.k, held.d) : '', inRV: player.inRV,
       dev: DEV ? `fps ${fps}\n${(Math.abs(shared.rv.speed) * CFG.MPH).toFixed(0)} mph  gear ${gearInfo(shared.rv.gear).name}  rpm ${shared.rv.rpm.toFixed(0)}\nfuel ${shared.rv.fuel.toFixed(2)} gal  temp ${shared.rv.temp.toFixed(0)}°F  grime ${shared.rv.grime.toFixed(2)}  hp ${shared.rv.integrity.toFixed(0)}\nplayer ${player.inRV ? 'RV' : 'world'} ${player.pos.x.toFixed(2)},${player.pos.y.toFixed(2)},${player.pos.z.toFixed(2)}  items ${shared.items.length}` : '',
     });
 

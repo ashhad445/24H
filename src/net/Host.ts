@@ -20,6 +20,7 @@ import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../
 const totalMilesWith = (route: number[]) => CFG.ROUTE_MILES + FORKS.reduce((a, f) => a + f.branches[Math.max(0, route[f.id])].delta, 0);
 
 const WHEELS: [number, number][] = [[-RV.wheelX, RV.wheelFrontZ], [RV.wheelX, RV.wheelFrontZ], [-RV.wheelX, RV.wheelRearZ], [RV.wheelX, RV.wheelRearZ]];
+const RV_FRIDGE_MAX = 8;
 const FOOD_KINDS = new Set(Object.entries(KINDS).filter(([, k]) => k.food).map(([n]) => n));
 
 export interface LedgerEntry { who: number; what: string; amount: number }
@@ -56,7 +57,7 @@ export class HostSim implements StopHost {
     const x = roadX(0) + LANE_OFFSET * Math.cos(yaw);
     this.s = {
       rv: newRVState(x, -LANE_OFFSET * Math.sin(yaw), yaw),
-      cab: { stoveOn: false, fire: 0, smoke: 0, fuseOut: false, flat: -1, nuts: 0, brew: 0 },
+      cab: { stoveOn: false, fire: 0, smoke: 0, fuseOut: false, flat: -1, nuts: 0, brew: 0, fridge: [['soda', 0], ['water', 0], ['water', 0]], fridgeT: 0 },
       rusty: newRustyState(),
       stops: {},
       route: FORKS.map(() => -1),
@@ -253,6 +254,20 @@ export class HostSim implements StopHost {
         if (held?.k === 'patty' && !inPan) { held.h = -1; held.s = 'skillet'; this.sfx('sizzle'); }
         else if (held?.k === 'patty') this.toast('Skillet is full');
         else if (!held && inPan) { inPan.s = ''; inPan.h = from; }
+        break;
+      }
+      case 'fridge': {
+        cab.fridgeT = 4; this.sfx('door');
+        if (held && (FOOD_KINDS.has(held.k) || held.k === 'patty')) {
+          if (cab.fridge.length >= RV_FRIDGE_MAX) { this.toast('Fridge is full'); break; }
+          if (held.p > 0) this.eatUnpaid(from, held); // stashing stock you haven't paid for counts as taking it
+          cab.fridge.push([held.k, held.d]); this.items.remove(held.id);
+        } else if (held) this.toast('Only food and drinks go in the fridge');
+        else if (cab.fridge.length) {
+          if (s.items.filter((i) => i.h === from).length >= 3) { this.toast('Pockets full (3 slots)'); break; }
+          const [k, d] = cab.fridge.pop()!;
+          const it = this.items.spawn(k, true, -0.9, 1.2, 2.9, '', d); it.h = from; this.sfx('grab');
+        } else this.toast('Fridge is empty. Stock it with food and drinks from the stores.');
         break;
       }
       case 'coffeemaker':
@@ -473,8 +488,10 @@ export class HostSim implements StopHost {
     if (it.k === 'cocktail') { c.drunk = Math.min(240, (c.drunk ?? 0) + 120); this.toast(`🍹 ${this.name(to)} is feeling GREAT. Maybe don't drive for a bit.`); }
     if (food.hypno) c.hypno = Math.max(0, c.hypno + food.hypno);
     if (food.caf) c.caf = Math.max(c.caf, food.caf);
+    if (it.k === 'water' && c.drunk > 0) { c.drunk = Math.max(0, c.drunk - 90); this.toast(`💧 ${this.name(to)} sobers up a bit`); }
     this.items.remove(it.id);
-    this.emit({ t: 'ev', k: 'fed', to, stam: food.stam });
+    const b = food.boost;
+    this.emit({ t: 'ev', k: 'fed', to, stam: food.stam, boost: b ? [b.t, b.drain, b.regen] : undefined });
     this.emit({ t: 'ev', k: 'emote', who: to, what: 'eat' });
     this.sfx('eat');
     const what = itemName(it.k, it.d);
@@ -756,6 +773,7 @@ export class HostSim implements StopHost {
       rv.integrity = Math.max(0, rv.integrity - dt * cab.fire * 0.5);
     }
     cab.smoke = Math.min(1, Math.max(0, cab.smoke + dt * (cab.fire * 0.1 - (rv.doorOpen ? 0.2 : 0.03))));
+    cab.fridgeT = Math.max(0, cab.fridgeT - dt);
     if (cab.brew > 0) {
       cab.brew -= dt;
       if (cab.brew <= 0) { cab.brew = 0; this.items.spawn('coffee', true, 0.9, 1.65, -0.12); this.sfx('cash'); this.toast('☕ Coffee is ready'); }

@@ -7,6 +7,8 @@ import { blackjack, grillJob, jukebox, roulette, slots } from './games';
 import { dinerDecor, scorpionChallenge } from './diner';
 import { bigWheel, casinoDecor, clawMachine, cocktailWaitress, coinPusher, diceTable, elvis } from './casino';
 import { kitProp } from './buildingKit';
+import { dispenser } from './dispensers';
+import { RUSTY_MILE, STORE as RUSTY_STORE } from './rusty';
 import { bed, building, decor, iceMachine, junkCars, lot, pawn, pumps, pylon, scrap, shop, table, vending } from './parts';
 
 /** Blender yard props: [kit name, x, z, rotY?, scale?, y?] (visual), plus optional colliders. */
@@ -37,11 +39,12 @@ const diner: StopDef = {
       [{ x0: 37.6, x1: 39.4, z0: -7, z1: -5 }]),
     // counter: checkout end by the register, pastry case for goods
     shop({ id: 'shop', clerkName: 'Flo', clerkColor: '#ec407a',
-      products: [['burger', 8, 3], ['cheeseburger', 10, 2], ['coffee', 2, 3], ['soda', 2, 3], ['energy', 4, 2]],
+      products: [['burger', 8, 3], ['cheeseburger', 10, 2], ['coffee', 2, 3], ['donut', 2, 4], ['soda', 2, 3], ['energy', 4, 2]],
       shelves: [{ x0: 22.5, x1: 23.7, z0: 3, z1: 7.4, top: 1.0 }],
       checkout: { x0: 27, x1: 28, z0: -6, z1: 4, top: 1.05 }, register: [27.5, 1.05, -5.3], clerk: [29, -3.5], store: DINER }),
     grillJob('grill', { x0: 33, x1: 34, z0: -7, z1: -5, top: 1.0 }, [27.5, 1.08, 2.6], [34.8, 1.5], 8, 6),
     jukebox('juke', [35.3, 6.6], 1),
+    dispenser({ id: 'fridge', type: 'fridge', x: 24, z: -9.62, face: '+z', rows: [['water', 1.5, 4], ['soda', 2, 4], ['energy', 4, 3]] }),
     dinerDecor('dressing'),
     scorpionChallenge('scorpion', [27.5, 1.05, -1.6]),
     table('booth1', { x0: 20.3, x1: 21.6, z0: -8.6, z1: -7 }, 0.78, 'white'),
@@ -186,8 +189,24 @@ const lastChance: StopDef = {
       shelves: [{ x0: 36.5, x1: 37.7, z0: -9, z1: -3.5, top: 1.0 }, { x0: 39, x1: 40.2, z0: -9, z1: -3.5, top: 1.0 }],
       checkout: { x0: 33, x1: 34, z0: 0.5, z1: 5, top: 1.05 }, register: [33.5, 1.05, 1.1], clerk: [35, 3], store: LCSTORE }),
     pawn('pawn', [40.5, 0.9, 3.8], 'Earl'),
+    dispenser({ id: 'fridge', type: 'fridge', x: 41.6, z: -1.2, face: '-x', rows: [['water', 2, 4], ['soda', 3, 4], ['energy', 6, 3]] }),
+    dispenser({ id: 'roller', type: 'roller', x: 32.6, z: -9.66, face: '+z', rows: [['hotdog', 5, 4], ['burrito', 7, 3]] }),
+    dispenser({ id: 'rack', type: 'rack', x: 30.3, z: -7, face: '+x', rows: [['chips', 3, 4], ['jerky', 6, 3], ['candy', 2.5, 5]] }),
     pylon('sign', 8, 22, [['LAST CHANCE', 80, '#ffeb3b'], ['GAS', 120, '#fff'], ['REG $4.00', 60, '#ffeb3b']], '#b71c1c'),
   ],
 };
 
-export const STOPS: StopDef[] = [diner, junkyard, motel, casino, lastChance];
+// ------------------------------------------------------------------ Rusty's extras
+// Rusty's Oasis has its own sim (RustySim); these kit parts share its frame (same mile, no branch) and
+// stand inside its store, so Cletus's checkout and theft rules apply to them.
+const rustyExtras: StopDef = {
+  id: 'rustyx', name: "Rusty's Oasis (coolers)", mile: RUSTY_MILE,
+  lot: { x0: RUSTY_STORE.x0, x1: RUSTY_STORE.x0 + 1, z0: RUSTY_STORE.z0, z1: RUSTY_STORE.z0 + 1 },
+  parts: [
+    dispenser({ id: 'fridge', type: 'fridge', x: 36, z: -11.62, face: '+z', rows: [['water', 1, 4], ['soda', 2, 4], ['energy', 4, 3]] }),
+    dispenser({ id: 'rack', type: 'rack', x: 38.4, z: -11.75, face: '+z', rows: [['chips', 2, 4], ['jerky', 4, 3], ['candy', 1.5, 5]] }),
+    dispenser({ id: 'roller', type: 'roller', x: 36, z: 7.69, face: '-z', rows: [['hotdog', 3, 4], ['burrito', 5, 3]] }),
+  ],
+};
+
+export const STOPS: StopDef[] = [rustyExtras, diner, junkyard, motel, casino, lastChance];

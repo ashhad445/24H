@@ -1,6 +1,6 @@
 // Fixed light budget. Three.js recompiles every shader whenever the number of visible lights
 // changes, which froze the game for 1–2 s (a cop showing up, NOS, a grease fire, driving past a stop).
-// Local lights are PoolLight markers instead; a fixed set of real PointLights follows the nearest ones.
+// Local lights are PoolLight markers instead; a fixed set of 4 real PointLights follows the nearest ones.
 import * as THREE from 'three';
 
 const all = new Set<PoolLight>();
@@ -27,7 +27,7 @@ export class LightPool {
   private real: THREE.PointLight[] = [];
   private picks: { p: PoolLight; score: number; x: number; y: number; z: number }[] = [];
 
-  constructor(private scene: THREE.Scene, size = 6) {
+  constructor(private scene: THREE.Scene, size = 4) {
     for (let i = 0; i < size; i++) {
       const l = new THREE.PointLight('#ffffff', 0, 1, 1);
       scene.add(l); this.real.push(l);

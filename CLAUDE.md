@@ -169,6 +169,7 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 | | Mouse | Look |
 | | E / LMB | Interact with 3D object / sit |
 | | G | Drop held item |
+| | Wheel / 1 2 3 | Switch hotbar slot (3 pockets) |
 | | F / LMB | Use held item |
 | Driver seat | W / S | Throttle / brake |
 | | A / D | Steer |
@@ -407,6 +408,16 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
     - Yard props: dumpster, trash can, barrel, crate, tires, bench, picnic table, news box.
     - `stops/buildingKit.ts` `dressBuilding()` fits the kit to any `building()` rect and to Rusty's store. Colliders don't change. Signs move up to rooftop boards, walls get a plaster texture, and new options are `windows / pilasters / portal`.
   - Fixes: canyon cliffs no longer bury the Canyon Junkyard; sign text shrinks to fit instead of clipping.
+- [x] **Stall fix, hotbar, food & fridges** (test: `npx tsx scripts/sim-shop.ts`):
+  - **1–2 s freezes fixed.** Three.js recompiles every shader when the visible light count changes (a cop or the shark spawning, NOS, a grease fire, a stop entering/leaving range).
+    - Local lights are `PoolLight` markers (`fx/LightPool.ts`); 4 real point lights follow the nearest ones, so the count never changes. **Never add a `THREE.PointLight`/`SpotLight` at runtime; use `PoolLight`.**
+    - `fx/ShaderWarm.ts` `warm(obj)` pre-compiles (incl. the mirror render-target variant): the whole scene + every vehicle type + every item at start, each road chunk, and each kit stop (hidden until compiled).
+  - **Hotbar**: Minecraft-style 3 slots, bottom center, icons (`itemIcon`), uses/gallons count, red unpaid price tag, item name pops up on switch.
+  - **FOV slider** (60–110°) in the Esc menu, saved with the other settings.
+  - **Caffeine buzz** (`food.boost`): coffee = +60 stamina, 150 s of sprint drain ×0.4 / refill ×2.2; energy drink = +35, 70 s at ×0.7 / ×1.5; candy bar = small 25 s buzz. ☕/⚡ timer on the stamina bar.
+  - **New food**: bottled water (sobers you up), hot dog, gas-station burrito, beef jerky, chips, glazed donut, candy bar.
+  - **Store fixtures** (`stops/dispensers.ts`): glass-door drinks fridge (open the door, take a drink), hot-dog roller, snack rack. Taking one puts it in your hand at its price; pay at the counter or steal it. Restock 1 per 90 s. At Rusty's (kit stop `rustyx` sharing Rusty's frame, so Cletus's checkout/theft rules apply), the Diner (fridge + donuts) and Last Chance Gas.
+  - **RV fridge**: click to put food/drinks in (8 max) or take the last one out; door swings open, contents show on the shelves. Starts with a soda + 2 waters.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
