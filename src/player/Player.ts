@@ -90,7 +90,7 @@ export class Player {
     if (this.stamina <= 0) this.tired = true;
     if (this.stamina > 25) this.tired = false;
     const sprinting = input.down('ShiftLeft') && moving && !this.tired;
-    this.stamina = Math.max(0, Math.min(100, this.stamina + (sprinting ? -18 : 10) * dt));
+    this.stamina = Math.max(0, Math.min(100, this.stamina + (sprinting ? -PLAYER.sprintDrain : PLAYER.sprintRegen) * dt));
     const speed = sprinting ? PLAYER.sprint : PLAYER.walk;
     const accel = this.onGround ? 14 : 2;
     const k = Math.min(1, accel * dt);

@@ -73,6 +73,9 @@ export const PLAYER = {
   eye: 1.6,
   walk: 3.2,
   sprint: 5.5,
+  /** Sprint stamina (0–100): drain and refill per second. 100 / 7 ≈ 14 s of sprinting. */
+  sprintDrain: 7,
+  sprintRegen: 12,
   jump: 5.5,
   gravity: 18,
   stepUp: 0.72,
