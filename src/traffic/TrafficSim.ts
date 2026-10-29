@@ -19,6 +19,9 @@ export interface TrafficHost extends ChaseHost {
   held(id: number): { id: number; k: string } | undefined;
 }
 
+/** Something on the road traffic must brake for / steer around (cows, cones, a closed crossing). Road coordinates. */
+export interface Obstacle { z: number; off: number; hw: number; hl: number }
+
 /** Road-following data for a traffic car (host only). dir +1 = same way as the RV (−Z). */
 interface Lane { dir: 1 | -1; lane: number; off: number; latV: number; cruise: number; changeCd: number; s: number /* road parameter (z on the centerline) */ }
 
@@ -45,7 +48,14 @@ export class TrafficSim {
   private prevZ: number | null = null;
   private prevSp = 0;
 
+  /** Static road obstacles from the encounter director (cows, cones, flaggers, crossing gates). */
+  obstacles: () => Obstacle[] = () => [];
+  private obs: Obstacle[] = [];
+
   constructor(private h: TrafficHost) {}
+
+  /** Bring Roscoe in sooner (an escaped convict in the RV, …). Needs heat > 0 to actually spawn him. */
+  summonCop(delay: number) { this.copDelay = Math.min(this.copDelay, delay); }
 
   private get s() { return this.h.s; }
 
@@ -68,6 +78,11 @@ export class TrafficSim {
       if (Math.abs(ooff - off) > hw + NPC_DIMS[o.k][0] + 0.3) continue;
       const a = along(o.z);
       if (a > -back && a < front) return false;
+    }
+    for (const o of this.obs) {
+      if (Math.abs(o.off - off) > hw + o.hw + 0.3) continue;
+      const a = along(o.z);
+      if (a > -back - o.hl && a < front + o.hl) return false;
     }
     const R = this.rvRoad();
     if (Math.abs(R.off - off) < hw + RV.halfW + 0.3) { const a = along(R.z); if (a > -back - 4 && a < front + 4) return false; }
@@ -108,6 +123,7 @@ export class TrafficSim {
     const s = this.s, rv = s.rv;
     this.time += dt;
     const R = this.rvRoad();
+    this.obs = this.obstacles();
 
     // ---------- keep traffic around the RV ----------
     let same = 0, onc = 0;
@@ -158,6 +174,9 @@ export class TrafficSim {
         if (!overlaps(ooff, hw + NPC_DIMS[o.k][0] + 0.3)) continue;
         consider(this.ahead(n, L.dir, o.z) - NPC_DIMS[n.k][1] - NPC_DIMS[o.k][1], (lo ? lo.dir : 1) === L.dir ? o.speed : -o.speed);
       }
+      for (const o of this.obs) {
+        if (overlaps(o.off, hw + o.hw + 0.3)) consider(this.ahead(n, L.dir, o.z) - NPC_DIMS[n.k][1] - o.hl, 0);
+      }
       if (overlaps(R.off, hw + RV.halfW + 0.3)) {
         consider(this.ahead(n, L.dir, R.z) - NPC_DIMS[n.k][1] - 3.9, L.dir === 1 ? rv.speed : -rv.speed);
       }
@@ -207,8 +226,56 @@ export class TrafficSim {
     this.stepCop(dt);
     this.stepShark(dt);
     this.stepBandits(dt);
+    this.stepRancher(dt);
     this.collide();
     this.collideCouch();
+  }
+
+  // ---------- the rancher: you hit one of his cows ----------
+  private rancher: { id: number; t: number; rams: number; cd: number; leave: boolean; dead: number } | null = null;
+
+  spawnRancher() {
+    if (this.rancher) return;
+    const R = this.rvRoad();
+    const [x, z] = roadPoint(R.z + 260, LANES[1]);
+    const n: NPCState = { id: this.nextId++, k: 'pickup', x, z, yaw: roadYaw(R.z + 260), speed: Math.abs(this.s.rv.speed) + 15, c: 3, w: 0 };
+    this.s.npcs.push(n);
+    this.rancher = { id: n.id, t: 0, rams: 0, cd: 5, leave: false, dead: 0 };
+    this.h.sfx('honk');
+    this.h.toast('🤠 A furious rancher in a green pickup is coming for you. "THAT WAS BESSIE!"');
+  }
+
+  private stepRancher(dt: number) {
+    const r = this.rancher; if (!r) return;
+    const car = this.s.npcs.find((n) => n.id === r.id);
+    if (!car) { this.rancher = null; return; }
+    if (car.w > 0) {
+      // shot or wrecked: it rolls to a stop and gets towed
+      car.speed = Math.max(0, car.speed - 8 * dt);
+      car.x += -Math.sin(car.yaw) * car.speed * dt; car.z += -Math.cos(car.yaw) * car.speed * dt;
+      if ((r.dead += dt) > 12) { this.removeNpc(car.id); this.rancher = null; }
+      return;
+    }
+    r.t += dt; r.cd -= dt;
+    const rv = this.s.rv, dist = Math.hypot(car.x - rv.x, car.z - rv.z);
+    if (!r.leave && (r.t > 60 || r.rams >= 3)) {
+      r.leave = true; r.t = 0;
+      this.h.toast('🤠 The rancher spits, shakes his fist and turns back for his herd.');
+    }
+    if (r.leave) {
+      const [tx, tz] = this.behindRV(500, -LANES[0]);
+      this.drive(car, tx, tz, 50, dt);
+      if (dist > 350 || r.t > 30) { this.removeNpc(car.id); this.rancher = null; }
+      return;
+    }
+    const attacking = r.cd <= 0;
+    const [tx, tz] = this.behindRV(attacking ? 4 : 14, attacking ? (r.rams % 2 ? -0.8 : 0.8) : 0);
+    this.drive(car, tx, tz, 95, dt, attacking ? 0 : 1);
+    if (attacking && dist < 7.2) {
+      this.ram(car, 0.6); r.rams++; r.cd = 7 + Math.random() * 4;
+      const lines = ['"YOU OWE ME A COW!"', '"BESSIE HAD A FAMILY!"', '"GET OFF MY ROAD, CITY FOLK!"'];
+      this.h.toast(`🤠 WHAM! ${lines[Math.floor(Math.random() * lines.length)]}`);
+    }
   }
 
   // ---------- Devil's Canyon bandits ----------
@@ -681,7 +748,7 @@ export class TrafficSim {
       rv.yaw += Math.max(-0.3, Math.min(0.3, along * dv1 * right * 0.012));
       // 3) the car: free body from here on (chasers keep driving, just slower)
       const w2x = v2x + nx * dv2, w2z = v2z + nz * dv2;
-      if (n.k === 'cop' || n.k === 'shark') n.speed = w2x * -Math.sin(n.yaw) + w2z * -Math.cos(n.yaw);
+      if (n.k === 'cop' || n.k === 'shark' || n.id === this.rancher?.id) n.speed = w2x * -Math.sin(n.yaw) + w2z * -Math.cos(n.yaw);
       else {
         n.vx = w2x; n.vz = w2z; n.speed = Math.hypot(w2x, w2z);
         n.spin = (n.spin ?? 0) + (Math.random() < 0.5 ? -1 : 1) * Math.min(6, dv2 * 0.25) + -along * dv2 * 0.02;

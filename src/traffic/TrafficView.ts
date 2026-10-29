@@ -9,7 +9,7 @@ import type { NPCState, SharedState } from '../types';
 
 const PAINT = ['#e53935', '#1e88e5', '#fdd835', '#43a047', '#f5f5f5', '#8e24aa'];
 
-interface View {
+export interface View {
   g: THREE.Group; k: NPCState['k'];
   red?: THREE.MeshStandardMaterial; blue?: THREE.MeshStandardMaterial; heads: THREE.MeshStandardMaterial; flash?: PoolLight;
   tail: THREE.MeshStandardMaterial; sigL: THREE.MeshStandardMaterial; sigR: THREE.MeshStandardMaterial;
@@ -56,7 +56,7 @@ function driver(g: THREE.Object3D, x: number, y: number, z: number, hat?: string
 }
 
 /** Vehicle facing −Z (like the RV). */
-function buildVehicle(k: NPCState['k'], c: number): View {
+export function buildVehicle(k: NPCState['k'], c: number): View {
   const g = new THREE.Group();
   const heads = new THREE.MeshStandardMaterial({ color: '#fffbe6', emissive: '#fff3c0', emissiveIntensity: 0.2 });
   const tail = new THREE.MeshStandardMaterial({ color: '#7a0000', emissive: '#ff1a1a', emissiveIntensity: 0.35 });

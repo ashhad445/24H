@@ -11,6 +11,7 @@ import { RustySim, newRustyState, type StopHost } from '../stops/RustySim';
 import { NPC_DIMS, TrafficSim } from '../traffic/TrafficSim';
 import { StopsHost } from '../stops/Stops';
 import { CanyonSim } from '../world/Canyon';
+import { EncounterSim, newEncState } from '../road/Encounters';
 import { CHARM2_QUOTES, CHARM_QUOTES } from '../rv/charmQuotes';
 import { GROOM, Groom } from './Groom';
 import { LANE_OFFSET, PILE_ROCKS, ROAD_HALF, roadPoint, baseX, chunkRocks, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
@@ -32,6 +33,7 @@ export class HostSim implements StopHost {
   readonly traffic: TrafficSim;
   readonly canyon: CanyonSim;
   readonly stops: StopsHost;
+  readonly enc: EncounterSim;
   private groom = new Groom((text) => this.emit({ t: 'ev', k: 'text', from: GROOM, text }));
   /** Every card transaction, for the end-of-run receipt. */
   readonly ledger: LedgerEntry[] = [];
@@ -68,6 +70,7 @@ export class HostSim implements StopHost {
       mafia: { on: false, thugs: [] },
       boulders: [],
       bandits: { phase: 0, t: 0, near: 0, fed: false, couch: null },
+      enc: newEncState(),
       items: [],
       crew: {},
       money: CFG.START_MONEY,
@@ -92,6 +95,13 @@ export class HostSim implements StopHost {
     this.traffic = new TrafficSim(this);
     this.canyon = new CanyonSim(this);
     this.stops = new StopsHost(this, this.items.statics);
+    this.enc = new EncounterSim(this);
+  }
+
+  /** Is the RV within r meters of a stop (Rusty's or an active kit stop)? */
+  nearStop(r: number) {
+    const rv = this.s.rv;
+    return [RUSTY_SET, ...this.stops.sets()].some((set) => Math.hypot(rv.x - set.x, rv.z - set.z) < r);
   }
 
   /** World position of an item, following its holder when carried. */
@@ -191,6 +201,7 @@ export class HostSim implements StopHost {
     if (id === 'roscoe') return this.traffic.payTicket(from);
     if (id === 'bandit') return this.traffic.feedBandits(from);
     if (this.stops.act(from, id)) return;
+    if (id.startsWith('enc:')) return this.enc.act(from, id);
     if (id.startsWith('player:')) return this.playerAct(from, held, Number(id.slice(7)));
 
     switch (id) {
@@ -277,6 +288,7 @@ export class HostSim implements StopHost {
         if (held && FOOD_KINDS.has(held.k)) this.feed(from, from, held);
         else if (held?.k === 'patty') this.eatPatty(from, held);
         else if (held?.k === 'scratch') this.scratch(from, held);
+        else if (held?.k === 'suitcase') this.enc.open(from, held);
         break;
       case 'fuelport':
         if (held?.k === 'nozzle') { if (!this.stops.pumpInto(from, held)) this.rusty.pumpInto(from, held); }
@@ -576,6 +588,7 @@ export class HostSim implements StopHost {
     this.hornCd = 3;
     const c = this.crew(d);
     c.hypno = Math.max(0, c.hypno - 0.15);
+    this.enc.honk();
   }
 
   private doShift(dir: number) {
@@ -756,6 +769,7 @@ export class HostSim implements StopHost {
     this.rusty.step(dt);
     this.traffic.step(dt);
     this.canyon.step(dt);
+    this.enc.step(dt);
     this.stops.step(dt);
     this.groom.step(s, dt);
 

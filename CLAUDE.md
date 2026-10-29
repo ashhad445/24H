@@ -317,7 +317,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] **Rusty Cactus Casino** (Cactus Strip, mile 190): high-roller slots ($25 → $300 / $1000), penny slots, roulette ($10, red/black 2×, green 14×), blackjack ($20, 3:2 on naturals), bouncer, neon saguaro
 - [x] **Last Chance Gas** (every route, mile 230): $4/gal pumps, Earl's overpriced store, pawn crate
 - Dev: `game.tp(mile, [forkA, forkB])` teleports (host). Test: `npx tsx scripts/sim-stops.ts`
-- Dev (`?dev`): F9 Rusty's · F10 next fork · F8 chapel · F7 sandstorm · F6 jump to 22:00. Tests: `sim-phase5.ts`, `sim-parked.ts`
+- Dev (`?dev`): F9 Rusty's · F10 next fork · F8 chapel · F7 sandstorm · F6 jump to 22:00 · F5 road encounter. Tests: `sim-phase5.ts`, `sim-parked.ts`
 ### Phase 6 — Audio, radio, juice  ← **built, needs human playtest**
 - [x] Dash radio (`audio/Radio.ts`): power knob + tune knob, dial needle. 4 stations of procedurally generated, seeded songs — **KCAC 98.1 Cactus Country** (boom-chick, twang), **SURF 66.6 Reverb Rock** (tremolo lead, slapback), **MIRAGE 103.5 Smooth Lounge** (walking bass, pads, vibes), **KDST AM 1220 Desert Talk** (DJ Desert Dale: ads, weather, scanner news, reads the groom's texts). Tune in mid-song; DJ bumpers between songs
 - [x] Radio voice = Web Speech API + on-screen captions. Reception: static in sandstorms / Devil's Canyon, AM better at night; muffled + quieter when you walk away from the RV
@@ -418,6 +418,19 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **New food**: bottled water (sobers you up), hot dog, gas-station burrito, beef jerky, chips, glazed donut, candy bar.
   - **Store fixtures** (`stops/dispensers.ts`): glass-door drinks fridge (open the door, take a drink), hot-dog roller, snack rack. Taking one puts it in your hand at its price; pay at the counter or steal it. Restock 1 per 90 s. At Rusty's (kit stop `rustyx` sharing Rusty's frame, so Cletus's checkout/theft rules apply), the Diner (fridge + donuts) and Last Chance Gas.
   - **RV fridge**: click to put food/drinks in (8 max) or take the last one out; door swings open, contents show on the shelves. Starts with a soda + 2 waters.
+- [x] **Road encounters** (`road/Encounters.ts` director + `road/kinds/*.ts`, view `road/EncounterView.ts`, meshes `road/meshes.ts`; test: `npx tsx scripts/sim-road.ts`):
+  - **Director** (host): one encounter every 55–100 s of driving (timer runs above 8 m/s, ×1.2 slower solo). Never two at once, never within 1.2 km of a stop / 2.2 km of a fork / 2.5 km of the chapel, not during bandits or the mafia, no repeat of the last 2 kinds. Spawns `clamp(speed × 14 s, 450, 1600)` m ahead so it's reachable at 200 mph. State: `s.enc` (`list`, `rider`, `weeds`, `rolling`, `cone`, `bird`).
+  - **Traffic** brakes for and merges around encounter obstacles (`TrafficSim.obstacles`: cows, closed lanes, the flagger on STOP, lowered crossing gates).
+  - **Hitchhiker**: stop within 25 m with the door open → they ride at the dinette. Drifter (poncho) pays $20 when leaving · shady guy (hoodie) steals a loose item · preacher (black suit) eases the driver's hypnosis · convict (orange jumpsuit) = +2 heat + Roscoe after a minute. They get out at the next stop, after 6 min, or when asked (`enc:rider`, RV stopped).
+  - **Broken-down motorist**: hood up, hazards on. Bring the fuse / coolant / 2 gal of gas they need (or duct tape): $35–60 or a free item. Pistol = rob them for $40 (50% +1 heat).
+  - **Cattle crossing**: 8–14 cows walk across. Horn = they bolt off the road. Hitting one: −6, big jolt, and a **rancher pickup** rams you up to 3 times (`TrafficSim.spawnRancher`).
+  - **Tumbleweeds** (sandstorms): roll across the road; the ones that hit the cab stick to the windshield (max 5, +grime). Wipers knock one off every 1.6 s; or pull one off by hand while stopped (`enc:weed`).
+  - **Ostrich**: races the RV on the shoulder (~42 mph). Throw it food → tamed; it follows, hops in through the open door, pecks standing players, and pays a $70 reward at the next stop.
+  - **Lost suitcase**: run it over = clothes everywhere. Grab it and LMB to open: 35% cash, 35% an item, 20% a **rattlesnake** (item `snake`, slithers to the nearest standing player and bites −8; grab it and throw it out the door), 10% Hawaiian shirts.
+  - **Road work**: 450 m zone, lanes 1–2 coned off, flagger with STOP (25 s) / SLOW (15 s), arrow board, workers, 45 MPH. Running STOP, speeding through, or making a worker dive = +1 heat each. Hit cones fly; 30% one jams under the bumper (scraping, drag) until a mechanic pulls it (`enc:cone`).
+  - **Train crossing**: bells + flashers when you're ~9 s away, gates drop, a 22–36 car freight train crosses at 22 m/s. Train hits the RV = −35. Squeeze across first = "BEAT THE TRAIN". Snapping a gate in front of Roscoe = +1 heat.
+  - New sounds: moo, hiss, train horn, scrape, squawk.
+  - Dev (`?dev`): **F5** cycles encounter kinds ahead of the RV; `game.enc('train', 300)` forces one at a distance.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 

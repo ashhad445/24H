@@ -19,17 +19,19 @@ import { RUSTY_FRAME, RUSTY_SET } from './stops/rusty';
 import { RustyView } from './stops/RustyView';
 import { CarHeist } from './stops/CarHeist';
 import { TrafficView, vehicleSamples } from './traffic/TrafficView';
+import { EncounterView } from './road/EncounterView';
+import { ENC_KINDS } from './road/Encounters';
 import { ChapelView } from './stops/ChapelView';
 import { StopsView } from './stops/Stops';
 import { MapView } from './ui/MapView';
 import { FORKS, branchAt, chapelZ, forkZ, progressMiles, setRouteChoices, totalMiles } from './world/Route';
-import type { GameMsg, ItemState, Pose, SharedState } from './types';
+import type { EncKind, GameMsg, ItemState, Pose, SharedState } from './types';
 import { HUD } from './ui/HUD';
 import { runLobby } from './ui/Lobby';
 import { setupSettings } from './ui/Settings';
 import { Vultures } from './world/Vultures';
 import { CanyonView } from './world/CanyonView';
-import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadX, roadYaw } from './world/World';
+import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadPoint, roadX, roadYaw } from './world/World';
 import { RockPiles } from './world/RockPiles';
 import { MafiaView } from './traffic/MafiaView';
 
@@ -99,6 +101,7 @@ const traffic = new TrafficView(scene, rv);
 const chapel = new ChapelView(scene);
 const vultures = new Vultures(scene);
 const canyonView = new CanyonView(scene);
+const encView = new EncounterView(scene, rv, (n, at) => sound.play(n, at));
 const rockPiles = new RockPiles();
 scene.add(rockPiles.group);
 const mafiaView = new MafiaView();
@@ -127,6 +130,7 @@ async function start() {
   // compile everything up front (hidden stops, every car type, every item) so nothing stalls mid-drive
   const samples = new THREE.Group();
   samples.add(vehicleSamples());
+  samples.add(EncounterView.samples());
   for (const k of Object.keys(KINDS)) samples.add(buildItemMesh(k));
   void warm(scene); void warm(samples);
   Assets.onReady(() => void warm(scene));
@@ -226,6 +230,9 @@ async function start() {
       let a = avatars.get(id); if (!a) { a = new Avatar(id, 'Dev Bean ' + id, rv, dyn); avatars.set(id, a); }
       a.setPose({ inRV: true, x: 0, y: 0.65, z: 0, yaw: Math.PI, pitch: 0, seat: '', ...p } as Pose); return a;
     }, get shared() { return shared; }, act,
+    /** Dev: start a road encounter ahead of the RV ('hitch', 'motorist', 'cattle', 'ostrich', 'suitcase', 'roadwork', 'train'). */
+    roadPoint,
+    enc(k: EncKind, ahead?: number) { if (!host) return null; host.s.enc.list = []; return host.enc.spawn(k, ahead === undefined ? undefined : host.s.rv.z - ahead); },
     /** Teleport the RV to a mile (host only), choosing fork branches first if given. */
     tp(mile: number, route?: number[]) {
       if (!host) return;
@@ -236,6 +243,7 @@ async function start() {
     },
   };
 
+  let devEnc = 0;
   let last = performance.now();
   let snapAcc = 0, poseAcc = 0, sprayAcc = 0, holdAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
   /** Interactions that repeat while the button is held (pumping gas, siphoning). */
@@ -265,7 +273,7 @@ async function start() {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     raycaster.far = PLAYER.reach;
     const ctx = { held: held?.k ?? '', cab: shared.cab };
-    for (const hit of raycaster.intersectObjects([rv.root, dyn, rusty.group, stopsView.root, rockPiles.group], true)) {
+    for (const hit of raycaster.intersectObjects([rv.root, dyn, rusty.group, stopsView.root, rockPiles.group, encView.root], true)) {
       const o = hit.object;
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (!seen(o)) continue; // raycasts ignore .visible, so hidden things (Roscoe off-duty) must be skipped here
@@ -295,7 +303,7 @@ async function start() {
       if (id.startsWith('rocks:')) return { id, hull: false, prompt: held ? 'Hands full — drop it first' : '🪨 Grab a rock (throw them at the cops from the rear window)' };
       if (id === 'bandit') return shared.bandits.phase === 2 ? { id, hull: false, prompt: held ? `Toss the bandits your ${itemName(held.k, held.d)} (fed bandits only take half)` : '🤠 "WHATCHA GOT FOR US?" (hand them food)' } : { id: '', prompt: '', hull: false };
       if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : held ? `Offer Roscoe your ${itemName(held.k, held.d)} (bribe?)` : 'ROSCOE: "Card, please." (or try a cheeseburger)' };
-      const prompt = id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
+      const prompt = id.startsWith('enc:') ? encView.promptFor(id, shared, held?.k ?? '') : id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
       return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
     }
     return { id: '', prompt: '', hull: false };
@@ -378,7 +386,7 @@ async function start() {
           act('spray', aimed ? 1 : 0);
         }
       } else if (held.k === 'map' && input.clicked(0)) mapView.toggle();
-      else if (input.clicked(0) && (KINDS[held.k]?.food || held.k === 'scratch')) act('self');
+      else if (input.clicked(0) && (KINDS[held.k]?.food || held.k === 'scratch' || held.k === 'suitcase')) act('self');
       if (input.clicked(2) && !rockThrow) dropHeld(7);
     }
     if (held && input.pressed('KeyG')) dropHeld(1.2);
@@ -402,6 +410,7 @@ async function start() {
     const siren = traffic.update(dt, shared, camera.getWorldPosition(new THREE.Vector3()), world.daylight);
     vultures.update(dt, shared, rv.root.position);
     canyonView.update(dt, shared);
+    encView.update(shared, dt, camera.getWorldPosition(new THREE.Vector3()));
 
     // dev: F9 teleports the RV to just before Rusty's Oasis
     if (DEV && host && input.pressed('F9')) {
@@ -423,6 +432,7 @@ async function start() {
     }
     if (DEV && input.pressed('F8')) devJump(chapelZ() + 300, 'to the chapel');
     if (DEV && host && input.pressed('F7')) { host.s.weather.storm = 1; (host as any).stormLeft = 60; hud.toast('DEV: sandstorm'); }
+    if (DEV && host && input.pressed('F5')) { const k = ENC_KINDS[devEnc++ % ENC_KINDS.length]; host.s.enc.list = []; host.enc.spawn(k); hud.toast(`DEV: encounter ${k}`); }
     if (DEV && host && input.pressed('F6')) { host.s.clock = (22 - CFG.START_HOUR) * 3600; hud.toast('DEV: 22:00'); }
     items.sync(shared.items, dt, shared.crew);
     if (input.wheel) act(`slot:${input.wheel > 0 ? 1 : -1}`);

@@ -67,6 +67,10 @@ export class ItemViews {
         v.obj.rotation.set(0, it.ry, 0);
       }
 
+      // the rattlesnake wriggles (harder when someone's holding it)
+      const segs = v.obj.userData.segs as THREE.Object3D[] | undefined;
+      if (segs) { const t = (performance.now() / 1000) * (it.h !== -1 ? 11 : 5); segs.forEach((m, i) => { m.position.x = Math.sin(i * 0.7 + t) * (it.h !== -1 ? 0.08 : 0.05); }); }
+
       if (v.patty && Math.abs(it.d - v.lastD) > 0.01) { v.patty.color.copy(pattyColor(it.d)); v.lastD = it.d; }
     }
     for (const [id, v] of this.views) {

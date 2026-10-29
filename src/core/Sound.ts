@@ -326,6 +326,11 @@ export class Sound {
       case 'bell': for (let i = 0; i < 3; i++) this.tone(1568, 1568, 0.3, 'sine', 0.2, i * 0.15); break;
       case 'buzz': for (let i = 0; i < 2; i++) this.tone(180, 175, 0.18, 'square', 0.08, i * 0.26); this.tone(1320, 1320, 0.08, 'sine', 0.1, 0.55); break;
       case 'crunch': this.noiseBurst(0.35, 900, 0.7); this.noiseBurst(0.25, 2800, 0.35, 0.04, 'highpass'); this.tone(90, 45, 0.3, 'sine', 0.6); break;
+      case 'moo': this.tone(150, 118, 0.9, 'sawtooth', 0.22); this.tone(300, 236, 0.9, 'triangle', 0.08); break;
+      case 'hiss': this.noiseBurst(0.9, 5200, 0.28, 0, 'highpass'); for (let i = 0; i < 6; i++) this.noiseBurst(0.04, 6500, 0.12, 0.9 + i * 0.05, 'highpass'); break;
+      case 'trainhorn': for (const [f, d] of [[311, 0], [370, 0], [466, 0], [311, 1.4], [370, 1.4], [466, 1.4]] as const) this.tone(f, f * 0.98, 1.1, 'sawtooth', 0.09, d); break;
+      case 'scrape': this.noiseBurst(0.45, 3200, 0.16, 0, 'highpass'); this.tone(220, 180, 0.4, 'square', 0.03); break;
+      case 'squawk': this.tone(700, 1300, 0.12, 'sawtooth', 0.18); this.tone(1300, 600, 0.18, 'sawtooth', 0.16, 0.12); this.tone(800, 1400, 0.1, 'square', 0.08, 0.32); break;
       case 'jackpot': for (let i = 0; i < 8; i++) this.tone(880 + i * 110, 880 + i * 110, 0.12, 'square', 0.12, i * 0.09); break;
     }
   }

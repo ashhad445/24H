@@ -104,6 +104,24 @@ export interface BanditState { phase: 0 | 1 | 2 | 3; t: number; near: number; fe
 /** Police: 0 none, 1 chasing, 2 tailing, 3 pulled over (Roscoe at the window), 4 leaving, 5 on foot after a player. */
 export interface CopState { phase: 0 | 1 | 2 | 3 | 4 | 5; t: number; fled: boolean; foot?: ChaseState | null }
 
+/** Road encounter kinds (see road/Encounters.ts). */
+export type EncKind = 'hitch' | 'motorist' | 'cattle' | 'ostrich' | 'suitcase' | 'roadwork' | 'train';
+
+/** One active road encounter. `z` = road distance (centerline z) it sits at, `off` = lateral offset (+ = right). Kind modules add their own small fields. */
+export interface Enc { id: number; k: EncKind; z: number; off: number; ph: number; t: number; [key: string]: any }
+
+/** A tumbleweed rolling across the road (world space). */
+export interface Weed { id: number; x: number; z: number; vx: number; vz: number; r: number }
+
+export interface EncState {
+  list: Enc[];
+  rider: { type: number; t: number; name: string } | null; // hitchhiker riding at the dinette
+  weeds: number; // tumbleweeds stuck on the windshield (0–5)
+  rolling: Weed[];
+  cone: number; // 1 = a traffic cone is jammed under the front bumper
+  bird: number; // 1 = a tamed ostrich is riding in the back
+}
+
 export interface SharedState {
   rv: RVState;
   route: number[]; // branch chosen at each fork (−1 = not reached yet)
@@ -114,6 +132,7 @@ export interface SharedState {
   mafia: { on: boolean; thugs: { id: number; x: number; z: number; hp: number }[] }; // late = the Bonetti crew hunts you; thugs wait at the chapel
   boulders: Boulder[];
   bandits: BanditState;
+  enc: EncState;
   rusty: RustyState;
   stops: Record<string, Record<string, any>>; // kit-built stops: stopId → partId → state
   cab: CabinState;

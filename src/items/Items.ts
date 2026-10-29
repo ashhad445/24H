@@ -58,6 +58,9 @@ export const KINDS: Record<string, ItemKind> = {
   plush: { name: 'Stuffed scorpion', r: 0.1 },
   fakecard: { name: 'Toy debit card', r: 0.03 },
   dice: { name: 'Casino die', r: 0.035 },
+  // road encounters
+  suitcase: { name: 'Lost suitcase (LMB to open)', r: 0.2 },
+  snake: { name: 'Rattlesnake (throw it out!)', r: 0.12 },
 };
 
 /** Hotbar icons. */
@@ -67,6 +70,7 @@ const ICONS: Record<string, string> = {
   extinguisher: '🧯', hammer: '🔨', tape: '🩹', coolant: '🧴', fuse: '🔌', spare: '🛞', card: '💳', nozzle: '⛽', jerrycan: '🛢️',
   sponge: '🧽', scratch: '🎟️', map: '🗺️', ice: '🧊', rock: '🪨', rocket: '🚀', pistol: '🔫', weed: '🌿', battery: '🔋', cat: '⚙️',
   wheel: '🛞', scorpion: '🦂', cocktail: '🍹', cactus: '🌵', plush: '🦂', fakecard: '💳', dice: '🎲',
+  suitcase: '🧳', snake: '🐍',
 };
 export const itemIcon = (k: string) => ICONS[k] ?? '📦';
 
@@ -407,6 +411,31 @@ export function buildItemMesh(k: string): THREE.Object3D {
       const g = new THREE.Group();
       const cube = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), mat('#c62828', { roughness: 0.3 })); cube.castShadow = true; g.add(cube);
       for (const [x, y, z] of [[0, 0.031, 0], [0.031, 0.012, 0.012], [0.031, -0.012, -0.012], [0, 0, 0.031]]) { const pip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), M.white); pip.position.set(x, y, z); g.add(pip); }
+      return g;
+    }
+    case 'suitcase': {
+      const g = new THREE.Group();
+      const shell = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.14), mat('#6d4c41', { roughness: 0.7 })); shell.castShadow = true; g.add(shell);
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.04, 0.145), mat('#3e2723')); band.position.y = 0.06; g.add(band);
+      const handle = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.01, 6, 12, Math.PI), M.black); handle.position.y = 0.15; g.add(handle);
+      for (const x of [-0.17, 0.17]) { const latch = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.15), M.chrome); latch.position.set(x, 0.1, 0); g.add(latch); }
+      const sticker = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), mat('#ffca28')); sticker.position.set(0.08, -0.04, 0.072); g.add(sticker);
+      return g;
+    }
+    case 'snake': {
+      // a coiled-ish S of tapering segments; the view wiggles it via userData.segs
+      const g = new THREE.Group();
+      const skin = mat('#a1887f', { roughness: 0.8 }), band = mat('#4e342e', { roughness: 0.8 });
+      const segs: THREE.Object3D[] = [];
+      for (let i = 0; i < 12; i++) {
+        const r = 0.028 * (1 - i / 16);
+        const m = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6).scale(1, 0.8, 1.6), i % 3 === 0 ? band : skin);
+        m.position.set(Math.sin(i * 0.7) * 0.06, -0.08, -0.2 + i * 0.035); m.castShadow = true; g.add(m); segs.push(m);
+      }
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8).scale(1.1, 0.7, 1.5), skin); head.position.set(0, -0.075, -0.24); g.add(head);
+      for (const s of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 4), mat('#ffd600', { emissive: '#ffab00', emissiveIntensity: 0.6 })); eye.position.set(s * 0.02, -0.06, -0.27); g.add(eye); }
+      const rattle = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.06, 6).rotateX(Math.PI / 2), mat('#d7ccc8')); rattle.position.set(0, -0.08, 0.24); g.add(rattle);
+      g.userData.segs = segs;
       return g;
     }
   }
