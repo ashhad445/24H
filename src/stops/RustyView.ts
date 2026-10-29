@@ -1,5 +1,6 @@
 // Client-side meshes, interactables and animation for Rusty's Oasis.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { makeNpc } from '../models/npcs';
 import type { PromptCtx } from '../rv/RV';
 import type { SharedState } from '../types';
@@ -92,7 +93,7 @@ export class RustyView {
     const fascia = new THREE.Mesh(new THREE.PlaneGeometry(9, 0.42), new THREE.MeshBasicMaterial({ map: signTex([["RUSTY'S", 150, '#fff']], '#c62828', 1024, 160) }));
     fascia.position.set(CANOPY.x0 - 0.03, CANOPY.y + 0.25, 0); fascia.rotation.y = -Math.PI / 2; g.add(fascia);
     for (const [x, z] of [[CANOPY.x0, CANOPY.z0], [CANOPY.x1, CANOPY.z0], [CANOPY.x0, CANOPY.z1], [CANOPY.x1, CANOPY.z1]]) this.box(M.steel, x - 0.15, x + 0.15, 0, CANOPY.y, z - 0.15, z + 0.15, true);
-    const canopyLight = new THREE.PointLight('#fff4d6', 6, 16, 1); canopyLight.position.set(12.5, CANOPY.y - 0.4, 0); g.add(canopyLight);
+    const canopyLight = new PoolLight('#fff4d6', 6, 16, 1); canopyLight.position.set(12.5, CANOPY.y - 0.4, 0); g.add(canopyLight);
     this.box(M.paint, 11.3, 12.7, 0, 0.18, -6.5, 6.5); // island curb
     PUMPS.forEach(([x, z], i) => {
       const pump = new THREE.Group();
@@ -152,7 +153,7 @@ export class RustyView {
       for (const [n, x, z, r] of [['dumpster', 52.5, -8, Math.PI / 2], ['trashcan', 32.8, -4.3, 0], ['newsbox', 32.8, 0.6, Math.PI / 2], ['bench', 32.6, -8, Math.PI / 2],
         ['barrel', 31.5, 10.5, 0], ['barrel', 32.2, 11, 0], ['tires', 47.5, 12, 0], ['crate', 52.6, 4, 0.3]] as [string, number, number, number][]) kitProp(g, n, x, z, r);
     });
-    for (const lp of [[40, -3], [48, 0]]) { const l = new THREE.PointLight('#ffe2a8', 5, 14, 1); l.position.set(lp[0], 3.5, lp[1]); g.add(l); }
+    for (const lp of [[40, -3], [48, 0]]) { const l = new PoolLight('#ffe2a8', 5, 14, 1); l.position.set(lp[0], 3.5, lp[1]); g.add(l); }
     // counter + register
     this.box(M.wood, COUNTER.x0, COUNTER.x1, 0, COUNTER.top, COUNTER.z0, COUNTER.z1, true);
     const reg = new THREE.Group();
@@ -174,7 +175,7 @@ export class RustyView {
     this.paper.position.set(0, 1.3, -0.35); this.cletus.add(this.paper);
 
     // ---------- back room: slots + crab derby ----------
-    const brLight = new THREE.PointLight('#ff4d6d', 4, 8, 1); brLight.position.set(48, 3.2, -4); g.add(brLight);
+    const brLight = new PoolLight('#ff4d6d', 4, 8, 1); brLight.position.set(48, 3.2, -4); g.add(brLight);
     const slot = new THREE.Group(); slot.position.set(...SLOT);
     const cab = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.9, 0.9), new THREE.MeshStandardMaterial({ color: '#6a1b9a', roughness: 0.5 })); cab.position.y = 0.95; cab.castShadow = true;
     const topper = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.35), new THREE.MeshBasicMaterial({ map: signTex([['LUCKY 777', 90, '#ffd54f']], '#4a148c', 512, 192) }));

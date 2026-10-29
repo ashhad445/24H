@@ -1,6 +1,7 @@
 // The Little Desert Chapel at the end of the route, with a heart arch over the road (the finish line).
 // Its position follows chapelZ(), which depends on the branches the crew chose.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { chapelZ } from '../world/Route';
 import { roadPoint, roadYaw } from '../world/World';
 
@@ -69,7 +70,7 @@ export class ChapelView {
       }),
     }));
     sign.position.set(cx - 5.12, 7.2, cz); sign.rotation.y = -Math.PI / 2; this.group.add(sign);
-    const glow = new THREE.PointLight('#ff4f9a', 18, 40, 1.2); glow.position.set(0, 8, 2); this.group.add(glow);
+    const glow = new PoolLight('#ff4f9a', 18, 40, 1.2); glow.position.set(0, 8, 2); this.group.add(glow);
   }
 
   update(focus: THREE.Vector3) {

@@ -1,5 +1,6 @@
 // Desert world: sky, sun, ground, and a streamed two-lane highway along −Z.
 import * as THREE from 'three';
+import { warm } from '../fx/ShaderWarm';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CFG } from '../config';
 import { Assets, BAKED_MAT } from '../core/AssetLoader';
@@ -416,7 +417,7 @@ export class World {
       this.chunks.clear();
     }
     const ci = Math.floor(-focus.z / CHUNK);
-    for (let i = ci - BEHIND; i <= ci + AHEAD; i++) if (i >= -2 && !this.chunks.has(i)) this.chunks.set(i, this.buildChunk(i));
+    for (let i = ci - BEHIND; i <= ci + AHEAD; i++) if (i >= -2 && !this.chunks.has(i)) { const c = this.buildChunk(i); this.chunks.set(i, c); void warm(c.group); }
     for (const [i, c] of this.chunks) {
       if (i < ci - BEHIND - 1 || i > ci + AHEAD + 1) {
         this.group.remove(c.group);

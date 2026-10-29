@@ -1,6 +1,7 @@
 // Procedural 1980s Class-C RV: hull, interior, clickable dash, gauges, wheels, lights.
 // root = untilted transform (x, z, yaw). body = child that pitches/rolls; everything visual hangs off body.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
 import { RVPolish } from './RVPolish';
@@ -96,12 +97,12 @@ export class RVModel {
   private fuseLamp!: THREE.MeshStandardMaterial;
   private stoveKnob!: THREE.Mesh;
   private fireGroup!: THREE.Group;
-  private fireLight!: THREE.PointLight;
+  private fireLight!: PoolLight;
   private brewLamp!: THREE.MeshStandardMaterial;
   private rearHatch = new THREE.Group();
   private nosLeds: THREE.MeshStandardMaterial[] = [];
   private nosFlame = new THREE.Group();
-  private nosLight!: THREE.PointLight;
+  private nosLight!: PoolLight;
   private binRocks: THREE.Mesh[] = [];
   private lastSpeed = 0;
   private polish!: RVPolish;
@@ -418,7 +419,7 @@ export class RVModel {
     this.reg('skillet', skillet, (_s, c) => (c.held === 'patty' ? 'Put patty in skillet' : c.held ? '' : 'Skillet'));
     // grease fire
     this.fireGroup = new THREE.Group(); this.fireGroup.position.set(1.0, 1.65, 0.53);
-    this.fireLight = new THREE.PointLight('#ff7a1a', 0, 6, 1); this.fireLight.position.y = 0.3;
+    this.fireLight = new PoolLight('#ff7a1a', 0, 6, 1); this.fireLight.position.y = 0.3;
     this.fireGroup.add(this.fireLight);
     this.fireGroup.visible = false;
     this.body.add(this.fireGroup);
@@ -501,7 +502,7 @@ export class RVModel {
       const outer = new THREE.Mesh(new THREE.ConeGeometry(0.13, 2.6, 10).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#2979ff', transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending }));
       outer.position.z = 1.3;
       this.nosFlame.add(core, outer); this.nosFlame.position.set(-0.95, 0.5, zRear + 0.3); this.nosFlame.visible = false;
-      this.nosLight = new THREE.PointLight('#4fc3f7', 0, 10, 1.5); this.nosLight.position.set(0, 0, 0.8); this.nosFlame.add(this.nosLight);
+      this.nosLight = new PoolLight('#4fc3f7', 0, 10, 1.5); this.nosLight.position.set(0, 0, 0.8); this.nosFlame.add(this.nosLight);
       this.body.add(this.nosFlame);
     }
 

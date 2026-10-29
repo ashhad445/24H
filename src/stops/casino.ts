@@ -2,6 +2,7 @@
 // the gamblers who never leave, and a bouncer who doesn't like winners.
 // Stop-local coords: casino box x 18..44, z −18..18, door on the x = 18 wall.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { makeNpc } from '../models/npcs';
 import { bonk, type ChaseHost } from './chase';
 import { MAT, canvasTex, type Component, type HostCtx } from './kit';
@@ -311,7 +312,7 @@ export function elvis(id: string, pos: [number, number]): Component {
       e.position.set(pos[0] + 0.5, 0.3, pos[1]); e.rotation.y = Math.PI / 2; v.group.add(e);
       const cape = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.9, 0.6), new THREE.MeshStandardMaterial({ color: '#ffd54f', metalness: 0.6, roughness: 0.3 })); cape.position.set(pos[0] + 0.72, 1.6, pos[1]); v.group.add(cape);
       const mic = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.5, 6), MAT.steel); mic.position.set(pos[0] - 0.1, 1.05, pos[1]); v.group.add(mic);
-      const spot = new THREE.SpotLight('#fff3e0', 25, 12, 0.5, 0.5); spot.position.set(pos[0] - 3, 4.6, pos[1]); spot.target.position.set(pos[0] + 0.5, 1, pos[1]); v.group.add(spot, spot.target);
+      const spot = new PoolLight('#fff3e0', 10, 9, 1); spot.position.set(pos[0] - 1.2, 3.4, pos[1]); v.group.add(spot); // stage light
       v.reg('sing', e, () => '🕺 Request a song from Elvis');
     },
     update(v, _st, _s, dt) {
@@ -343,7 +344,7 @@ export function casinoDecor(id: string): Component {
         const ch = new THREE.Group();
         for (let i = 0; i < 10; i++) { const cr = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), crystal); const a = (i / 10) * Math.PI * 2; cr.position.set(Math.cos(a) * 0.45, -0.2 - (i % 3) * 0.12, Math.sin(a) * 0.45); ch.add(cr); }
         const ring = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.03, 6, 20).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#d4a017', metalness: 0.8 })); ch.add(ring);
-        const l = new THREE.PointLight('#ffe0b2', 6, 13, 1.2); l.position.y = -0.4; ch.add(l);
+        const l = new PoolLight('#ffe0b2', 6, 13, 1.2); l.position.y = -0.4; ch.add(l);
         ch.position.set(x, 4.4, z); g.add(ch); chandeliers.push(ch);
       }
       // cashier cage

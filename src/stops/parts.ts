@@ -1,6 +1,7 @@
 // Basic stop components: buildings, tables, signs, shop + clerk, pumps, pawn, vending, ice, bed, scrap, junk.
 // Coordinates are stop-local: +X away from the road, −Z = road forward. Doors face the road (−X).
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { itemName } from '../items/Items';
 import type { Box2 } from '../rv/RV';
 import type { ChaseState, ItemState } from '../types';
@@ -77,7 +78,7 @@ export function building(o: BuildingOpts): Component {
       }
       const n = Math.max(1, Math.round((o.x1 - o.x0) * (o.z1 - o.z0) / 90));
       for (let i = 0; i < n; i++) {
-        const l = new THREE.PointLight(o.light ?? '#ffe2a8', 5, 14, 1);
+        const l = new PoolLight(o.light ?? '#ffe2a8', 5, 14, 1);
         l.position.set(o.x0 + ((o.x1 - o.x0) * (i + 0.5)) / n, o.h - 0.4, (o.z0 + o.z1) / 2);
         v.group.add(l);
       }

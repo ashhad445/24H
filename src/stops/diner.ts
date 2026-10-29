@@ -1,6 +1,7 @@
 // Lucky Scorpion Diner extras: the room dressing, regulars, the parking lot, and the Scorpion Challenge.
 // Stop-local coords: +X away from the road. The diner box is x 20..36, z −10..8; the counter runs x 27–28.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import type { Box2 } from '../rv/RV';
 import { makeNpc } from '../models/npcs';
 import { MAT, canvasTex, type Component } from './kit';
@@ -91,7 +92,7 @@ export function dinerDecor(id: string): Component {
       const eat = v.sign([['EAT', 120, '#ff1744']], '#1a0a0a', 1.8, 0.8, 256, 128);
       eat.position.set(19.75, 3.0, 5.2); eat.rotation.y = -Math.PI / 2;
       (eat.material as THREE.MeshBasicMaterial).color.set('#ffffff');
-      const eatGlow = new THREE.PointLight('#ff1744', 4, 6, 1.5); eatGlow.position.set(19.3, 3.0, 5.2); g.add(eatGlow);
+      const eatGlow = new PoolLight('#ff1744', 4, 6, 1.5); eatGlow.position.set(19.3, 3.0, 5.2); g.add(eatGlow);
 
       // the regulars (human root ≈ seat height − 0.4)
       const seat = (who: THREE.Object3D, x: number, y: number, z: number, yaw: number) => { who.position.set(x, y, z); who.rotation.y = yaw; g.add(who); };

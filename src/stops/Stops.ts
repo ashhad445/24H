@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { PromptCtx } from '../rv/RV';
 import type { ItemState, SharedState } from '../types';
 import { addClearZone } from '../world/World';
+import { warm } from '../fx/ShaderWarm';
 import { STOPS } from './defs';
 import type { StaticSet } from './geom';
 import { makeHostCtx, signTexture, stopFrame, stopOnRoute, type HostCtx, type StopDef, type ViewCtx } from './kit';
@@ -79,7 +80,7 @@ type Prompt = (st: any, c: PromptCtx, s: SharedState) => string;
 
 export class StopsView {
   readonly root = new THREE.Group();
-  private built = new Map<string, { def: StopDef; group: THREE.Group; ctx: ViewCtx; prompts: Map<string, Prompt> }>();
+  private built = new Map<string, { def: StopDef; group: THREE.Group; ctx: ViewCtx; prompts: Map<string, Prompt>; ready: boolean }>();
 
   constructor(scene: THREE.Scene, private statics: StaticSet[], private play: (n: string, at?: [number, number, number]) => void) {
     scene.add(this.root);
@@ -115,7 +116,11 @@ export class StopsView {
       },
     };
     for (const p of def.parts) { current = p.id; p.build(ctx); }
-    this.built.set(def.id, { def, group, ctx, prompts });
+    const b = { def, group, ctx, prompts, ready: false };
+    this.built.set(def.id, b);
+    // stay hidden until the shaders are compiled (off the main thread), so arriving doesn't stall a frame
+    group.visible = false;
+    void warm(group).then(() => { b.ready = true; });
     this.statics.push(set);
     addClearZone({ ...set, x0: def.lot.x0 - 1, x1: def.lot.x1 + 15, z0: def.lot.z0 - 10, z1: def.lot.z1 + 10 });
   }
@@ -123,7 +128,7 @@ export class StopsView {
   update(s: SharedState, dt: number, focus: THREE.Vector3, itemPos: (id: number) => THREE.Vector3 | null) {
     for (const def of STOPS) if (s.stops[def.id] && !this.built.has(def.id)) this.build(def);
     for (const b of this.built.values()) {
-      b.group.visible = Math.hypot(focus.x - b.group.position.x, focus.z - b.group.position.z) < 1600;
+      b.group.visible = b.ready && Math.hypot(focus.x - b.group.position.x, focus.z - b.group.position.z) < 1600;
       if (!b.group.visible) continue;
       const st = s.stops[b.def.id]; if (!st) continue;
       for (const p of b.def.parts) p.update?.(b.ctx, st[p.id], s, dt, itemPos);

@@ -4,11 +4,13 @@ import { CFG, DEV, PLAYER, gearInfo } from './config';
 import { Input } from './core/Input';
 import { Assets } from './core/AssetLoader';
 import { Sound } from './core/Sound';
-import { KINDS, itemName } from './items/Items';
+import { KINDS, buildItemMesh, itemName } from './items/Items';
 import { ItemViews } from './items/ItemViews';
 import { HostSim } from './net/Host';
 import type { Net } from './net/Net';
 import { Effects } from './fx/Effects';
+import { LightPool } from './fx/LightPool';
+import { initShaderWarm, warm } from './fx/ShaderWarm';
 import { Avatar } from './player/Avatar';
 import { Character } from './models/Character';
 import { Player } from './player/Player';
@@ -16,7 +18,7 @@ import { RVModel } from './rv/RV';
 import { RUSTY_FRAME, RUSTY_SET } from './stops/rusty';
 import { RustyView } from './stops/RustyView';
 import { CarHeist } from './stops/CarHeist';
-import { TrafficView } from './traffic/TrafficView';
+import { TrafficView, vehicleSamples } from './traffic/TrafficView';
 import { ChapelView } from './stops/ChapelView';
 import { StopsView } from './stops/Stops';
 import { MapView } from './ui/MapView';
@@ -43,6 +45,7 @@ renderer.toneMappingExposure = 1.0;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 2500);
+const lightPool = new LightPool(scene);
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
@@ -64,6 +67,7 @@ const mirrorCam = new THREE.PerspectiveCamera(40, 320 / 104, 0.5, 2500);
 rv.mirrorAnchor.add(mirrorCam);
 mirrorCam.rotation.x = -0.12;
 const mirrorTex = mirrorRT.texture;
+initShaderWarm(renderer, camera, scene, mirrorRT);
 mirrorTex.colorSpace = THREE.SRGBColorSpace;
 mirrorTex.repeat.x = -1; mirrorTex.offset.x = 1; // mirror flip
 (rv.mirror.material as THREE.MeshBasicMaterial).map = mirrorTex;
@@ -120,6 +124,12 @@ async function start() {
   const net: Net = await runLobby();
   await Assets.wait(5000);
   lobbyLoop = false;
+  // compile everything up front (hidden stops, every car type, every item) so nothing stalls mid-drive
+  const samples = new THREE.Group();
+  samples.add(vehicleSamples());
+  for (const k of Object.keys(KINDS)) samples.add(buildItemMesh(k));
+  void warm(scene); void warm(samples);
+  Assets.onReady(() => void warm(scene));
   rv.body.add(camera);
   hud.show();
   input.lock();
@@ -476,6 +486,7 @@ async function start() {
     });
 
     if (!render) { input.endFrame(); return; }
+    lightPool.update(camPos, dt);
     if (frame % 2 === 0) {
       rv.mirror.visible = false;
       renderer.setRenderTarget(mirrorRT);

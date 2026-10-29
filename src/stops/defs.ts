@@ -1,5 +1,6 @@
 // The stops after Rusty's Oasis, built from kit parts. Stop-local coords: +X away from the road.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { MAT, type StopDef } from './kit';
 import { makeNpc } from '../models/npcs';
 import { blackjack, grillJob, jukebox, roulette, slots } from './games';
@@ -18,7 +19,7 @@ const canopy = (x0: number, x1: number, z0: number, z1: number, h: number, title
   for (const [x, z] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) v.box(MAT.steel, x - 0.15, x + 0.15, 0, h, z - 0.15, z + 0.15, true);
   const s = v.sign([[title, 110, '#fff']], '#c62828', z1 - z0, 0.42, 1024, 160);
   s.position.set(x0 - 0.03, h + 0.25, (z0 + z1) / 2); s.rotation.y = -Math.PI / 2;
-  const l = new THREE.PointLight('#fff4d6', 6, 16, 1); l.position.set((x0 + x1) / 2, h - 0.4, (z0 + z1) / 2); v.group.add(l);
+  const l = new PoolLight('#fff4d6', 6, 16, 1); l.position.set((x0 + x1) / 2, h - 0.4, (z0 + z1) / 2); v.group.add(l);
 }, [[x0, z0], [x1, z0], [x0, z1], [x1, z1]].map(([x, z]) => ({ x0: x - 0.2, x1: x + 0.2, z0: z - 0.2, z1: z + 0.2 })));
 
 // ------------------------------------------------------------------ Lucky Scorpion Diner (I-15)
@@ -159,7 +160,7 @@ const casino: StopDef = {
       const neon = new THREE.MeshStandardMaterial({ color: '#69f0ae', emissive: '#00e676', emissiveIntensity: 2 });
       v.box(neon, 20, 21, 5, 13, -1, 1); v.box(neon, 20, 21, 8, 9, 1, 3.5); v.box(neon, 20, 21, 9, 11.5, 2.5, 3.5);
       v.box(neon, 20, 21, 7, 8, -3.5, -1); v.box(neon, 20, 21, 8, 10.5, -3.5, -2.5);
-      const l = new THREE.PointLight('#00e676', 20, 40, 1.2); l.position.set(18, 9, 0); v.group.add(l);
+      const l = new PoolLight('#00e676', 20, 40, 1.2); l.position.set(18, 9, 0); v.group.add(l);
     }),
     pylon('sign', 8, 32, [['RUSTY CACTUS', 70, '#ffd54f'], ['CASINO', 120, '#ff4081'], ['LOOSEST SLOTS IN NEVADA', 34, '#fff']], '#1a0033'),
   ],

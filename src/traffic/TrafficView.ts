@@ -1,5 +1,6 @@
 // Client rendering of NPC vehicles, Roscoe on foot, flashing lights and the siren.
 import * as THREE from 'three';
+import { PoolLight } from '../fx/LightPool';
 import { makeNpc } from '../models/npcs';
 import type { RVModel } from '../rv/RV';
 import { chaserPose } from '../stops/chaseView';
@@ -10,7 +11,7 @@ const PAINT = ['#e53935', '#1e88e5', '#fdd835', '#43a047', '#f5f5f5', '#8e24aa']
 
 interface View {
   g: THREE.Group; k: NPCState['k'];
-  red?: THREE.MeshStandardMaterial; blue?: THREE.MeshStandardMaterial; heads: THREE.MeshStandardMaterial; flash?: THREE.PointLight;
+  red?: THREE.MeshStandardMaterial; blue?: THREE.MeshStandardMaterial; heads: THREE.MeshStandardMaterial; flash?: PoolLight;
   tail: THREE.MeshStandardMaterial; sigL: THREE.MeshStandardMaterial; sigR: THREE.MeshStandardMaterial;
   wheels: THREE.Object3D[]; wheelR: number; lastSpeed: number; brakeT: number; sigT: number;
 }
@@ -172,7 +173,7 @@ function buildVehicle(k: NPCState['k'], c: number): View {
     box(g, black, w * 0.7, 0.08, 0.3, 0, roofY, 0.1);
     box(g, view.red, w * 0.32, 0.14, 0.26, -w * 0.18, roofY + 0.1, 0.1);
     box(g, view.blue, w * 0.32, 0.14, 0.26, w * 0.18, roofY + 0.1, 0.1);
-    view.flash = new THREE.PointLight('#ff1a1a', 0, 22, 1.2); view.flash.position.set(0, roofY + 0.5, 0.1); g.add(view.flash);
+    view.flash = new PoolLight('#ff1a1a', 0, 22, 1.2); view.flash.position.set(0, roofY + 0.5, 0.1); g.add(view.flash);
   }
   return view;
 }
@@ -180,6 +181,13 @@ function buildVehicle(k: NPCState['k'], c: number): View {
 function buildRoscoe() {
   const g = makeNpc('roscoe');
   g.traverse((o) => { o.userData.iid = 'roscoe'; });
+  return g;
+}
+
+/** One of every vehicle type, never added to the scene: compiled at boot so the first cop / semi doesn't stall a frame. */
+export function vehicleSamples(): THREE.Group {
+  const g = new THREE.Group();
+  for (const k of ['sedan', 'pickup', 'camper', 'semi', 'cop', 'shark', 'bandit'] as NPCState['k'][]) g.add(buildVehicle(k, 0).g);
   return g;
 }
 
