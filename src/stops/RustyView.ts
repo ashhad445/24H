@@ -238,7 +238,7 @@ export class RustyView {
       if (sp.n === 'z-') m.rotation.y = Math.PI;
       if (sp.n === 'y') { m.rotation.x = -Math.PI / 2; m.position.y += 0.012; }
       this.sedan.add(m); this.splats.push(m);
-      this.reg(`rusty:dirt${i}`, m, (s, c) => (s.rusty.wash.dirt[i] <= 0 ? '' : c.held === 'sponge' ? 'Scrub the mud' : 'Mud — grab the sponge (crate by the bucket)'));
+      this.reg(`rusty:dirt${i}`, m, (s, c) => (s.rusty.wash.dirt[i] <= 0 ? '' : c.held === 'sponge' ? `Scrub the mud (${s.rusty.wash.dirt.filter((v) => v > 0).length} splats left, $${PRICES.wash} when clean)` : 'Mud — grab the sponge (crate by the bucket)'));
     });
     const bucket = new THREE.Group(); bucket.position.set(...BUCKET);
     const pail = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.38, 14, 1, true), new THREE.MeshStandardMaterial({ color: '#1565c0', side: THREE.DoubleSide })); pail.position.y = 0.19;

@@ -40,7 +40,7 @@ export const SEDAN = { x: 40, z: 23, len: 4.4, wid: 1.8 };
 export const SPLATS: { p: [number, number, number]; n: 'z+' | 'z-' | 'y' }[] = [
   { p: [38.6, 0.75, 23.92], n: 'z+' }, { p: [40.2, 0.95, 23.92], n: 'z+' }, { p: [41.5, 0.7, 23.92], n: 'z+' },
   { p: [38.9, 0.8, 22.08], n: 'z-' }, { p: [40.6, 0.7, 22.08], n: 'z-' }, { p: [41.6, 0.9, 22.08], n: 'z-' },
-  { p: [38.5, 1.02, 23.0], n: 'y' }, { p: [40.4, 1.42, 23.0], n: 'y' },
+  { p: [38.5, 1.02, 23.0], n: 'y' }, { p: [41.7, 1.02, 23.0], n: 'y' }, // trunk (the cab roof is at 1.5, a splat lower than that is buried inside it)
 ];
 export const BUCKET: [number, number, number] = [35.6, 0, 19.2];
 export const CRATE = { x0: 35.2, x1: 36.0, z0: 17.6, z1: 18.4, top: 0.6 };
