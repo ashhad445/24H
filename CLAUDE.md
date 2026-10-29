@@ -197,8 +197,30 @@ Procedural Web Audio (engine, road, ambience, SFX) + procedural radio stations (
 
 ## 18b. Hosting
 - **Production = one Node service**: `npm run build` then `npm start`. `server/relay.ts` serves `dist/` over HTTP and the WebSocket relay on the same port (`PORT` env). The lobby auto-targets `wss://<same host>`; on Vite dev (:3000) it targets `ws://host:3001`.
-- **Render**: `render.yaml` blueprint (free plan sleeps after ~15 min idle → ~50 s cold start). Railway / Fly.io work the same way (build + start command, needs WebSocket support). Static-only hosts (Netlify, GitHub Pages, itch.io) can serve the client, but the relay must run somewhere that supports WebSockets.
-- **Cloudflare (free, no card)**: `worker/relay.ts` is the same relay as a Durable Object (`wrangler.toml`). `npx wrangler login`, `npm run deploy:relay` (prints the `*.workers.dev` URL), then build the client with `VITE_RELAY_URL=wss://<that host>` and `npm run deploy:client` (Pages). Local test: `npm run relay:worker` + `npx tsx scripts/test-worker.ts`.
+- **Live: Cloudflare Worker (free plan, no card)** → **https://roadtrip-relay.weddingweed.workers.dev**
+  - One Worker is the whole game. `worker/relay.ts` serves `dist/` as static assets and runs the relay on the same URL. The relay is a Durable Object (`Hub`), one instance holding every room, with the same protocol as `server/relay.ts`. Config: `worker/wrangler.toml`.
+  - **Auto-deploy**: the Worker is connected to GitHub `ashhad445/24H` (Workers Builds).
+    - Every push to `main` runs `npm run build`, then `npx wrangler deploy --config worker/wrangler.toml`, and goes live in a few minutes.
+    - Other branches get preview builds; the live site only changes from `main`.
+    - A failed build keeps the last good version live. Check the dashboard under `roadtrip-relay` → Deployments.
+    - A deploy restarts the relay, which disconnects games in progress, so don't push while people are playing.
+  - Manual deploy from a logged-in machine: `npm run deploy`.
+  - Local test: `npm run relay:worker` (port 8787), then `npx tsx scripts/test-worker.ts [wss://host]`.
+  - `VITE_RELAY_URL` (build time) points a client at a relay on another host. It is unset for the Worker, which uses the same host.
+  - **Free plan limits** (as of 2026-10; check Cloudflare's docs). Going over doesn't bill you; requests just fail until the daily reset at 00:00 UTC.
+    - Workers: 100k requests/day and 10 ms CPU per request. `run_worker_first` means every asset fetch counts, about 7 per page load. Each WebSocket connect is 1.
+    - Durable Objects: 100k requests/day; 13,000 GB-s/day of duration; 5 GB storage (unused).
+      - **Incoming WebSocket messages count as 1 request per 20.** Outgoing messages are free.
+      - The hub stays in memory while any socket is open. 128 MB × 24 h ≈ 11,000 GB-s, so even round-the-clock play fits.
+    - **The real ceiling is message volume.** Every client sends poses at 20 Hz and the host sends snapshots at 20 Hz.
+      - 4 players ≈ 80+ msg/s ≈ 15k DO requests per hour, so about **6 hours of 4-player play a day**.
+      - 2 players ≈ 12 h/day.
+      - If that bites, lower the pose/snapshot rate or batch messages.
+    - Workers Builds: 3,000 build minutes/month, one build at a time.
+- **Old / alternatives**:
+  - `npm run build && npm start` runs the Node relay that serves `dist/` (see above). `render.yaml` remains, but Render now wants a card.
+  - For a quick playtest from this PC: `npx cloudflared tunnel --url http://localhost:3001`.
+  - The Pages project `roadtrip-roulette-eoo` is a stale direct upload and can be deleted.
 - Health check: `GET /health`. Server pings sockets every 25 s so proxies don't drop idle connections.
 
 ## 19. Win / Lose & Meta
