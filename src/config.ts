@@ -40,6 +40,9 @@ export const RV = {
   doorTop: 2.75,
 };
 /** Nitrous: a small tank, refilled with (expensive) rocket fuel. */
+/** Chasers (Roscoe, the Loan Shark) top out below the RV's ~88 m/s, so flooring it loses them:
+ *  stay more than `loseDist` ahead for `loseT` s (after `grace` s, since they spawn 480 m back). */
+export const CHASE = { copV: 78, sharkV: 76, loseDist: 280, loseT: 8, grace: 15 };
 export const NOS = { CHARGES: 3, BURN: 5, ACC: 7, OVER: 1.25 };
 
 export const WHEELBASE = RV.wheelRearZ - RV.wheelFrontZ;

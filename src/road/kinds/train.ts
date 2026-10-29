@@ -35,13 +35,23 @@ export const train: KindDef = {
     e.t += dt;
     const dist = rv.z - e.z;
     const sp = Math.abs(rv.speed);
+    // the engineer blows the horn on the way in: you hear it long before you see it
+    if (e.ph <= 1 && dist < 2200 && e.dir * e.u < 0) {
+      e.hornT = (e.hornT ?? 0) - dt;
+      if (e.hornT <= 0) {
+        e.hornT = 6;
+        const [rx, rz] = rightVec(e.z), [cx, cz] = roadPoint(e.z, 0);
+        const u = e.ph === 0 ? -e.dir * 600 : e.u; // still out in the desert before the bells
+        h.sfx('trainhorn', [cx + rx * u, 4, cz + rz * u]);
+        if (!e.heard) { e.heard = 1; h.toast('🚂 A train horn echoes somewhere ahead…'); }
+      }
+    }
     if (e.ph === 0) {
       if (!e.warned && dist < Math.max(900, sp * 16)) { e.warned = 1; h.toast('🚂 RAILROAD CROSSING ahead.'); }
       // bells start so the locomotive gets there about when (or just before) you do
       if (dist < Math.max(420, sp * TRAIN.warn)) {
         e.ph = 1; e.t = 0;
         e.u = -e.dir * (TRAIN.speed * TRAIN.warn + rnd(-20, 40));
-        h.sfx('trainhorn', [e.cx, 3, e.z]);
         h.toast('🚂 DING DING DING — a freight train is coming! Stop at the gates… or race it.');
       }
       return rv.z > e.z - 300;

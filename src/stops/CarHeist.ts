@@ -8,8 +8,8 @@ import type { Input } from '../core/Input';
 type Res = 'ok' | 'fail' | 'cancel' | null;
 
 /** bolts, arc width (rad), pointer speed (rad/s) per part */
-const PARTS: Record<string, [number, number, number]> = { battery: [2, 1.1, 3.2], wheel: [4, 0.8, 4.2], cat: [3, 0.5, 5.6] };
-const BAND: [number, number] = [0.72, 0.86];
+const PARTS: Record<string, [number, number, number]> = { battery: [2, 1.55, 2.6], wheel: [4, 1.15, 3.4], cat: [3, 0.75, 4.4] };
+const BAND: [number, number] = [0.64, 0.88];
 
 const mat = (color: string, opacity = 1) => new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, depthTest: false });
 
@@ -54,7 +54,7 @@ export class CarHeist {
       this.g.add(tube, band, this.gas);
     } else {
       const [bolts, arc, speed] = PARTS[part] ?? PARTS.battery;
-      this.spec = [bolts, arc * (alarm ? 0.7 : 1), speed * (alarm ? 1.15 : 1)];
+      this.spec = [bolts, arc * (alarm ? 0.85 : 1), speed * (alarm ? 1.05 : 1)];
       this.bolt = 0; this.ang = 0; this.arcAt = Math.random() * Math.PI * 2;
       this.g.add(new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.008, 6, 48), mat('#90a4ae')));
       this.arc = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.014, 6, 24, this.spec[1]), mat('#00e676'));
@@ -90,12 +90,12 @@ export class CarHeist {
     if (me.distanceTo(this.at) > 3.5 || input.pressed('KeyG') || input.pressed('Escape')) return this.end('cancel');
     if (this.kind === 'siphon') {
       if (input.mouseDown(0) || input.down('KeyE')) {
-        this.level += (0.12 + 0.9 * this.level) * dt; // faster the higher it gets
+        this.level += (0.1 + 0.65 * this.level) * dt; // faster the higher it gets
         if (this.level >= 1) { this.sfx('error'); return this.end('fail'); } // mouthful of gas
       } else if (this.level > 0.05) {
         if (this.level >= BAND[0] && this.level <= BAND[1]) { this.sfx('pour'); return this.end('ok'); }
-        if (++this.tries >= 2) { this.sfx('error'); return this.end('fail'); }
-        this.level = 0; this.sfx('click'); // it fell back down — one more go
+        if (++this.tries >= 3) { this.sfx('error'); return this.end('fail'); }
+        this.level = 0; this.sfx('click'); // it fell back down — try again
       }
     } else {
       this.ang = (this.ang + this.spec[2] * dt) % (Math.PI * 2);

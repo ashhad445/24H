@@ -297,6 +297,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] Sheriff Roscoe: spawns ~25 s after heat > 0, chases with lights + siren, tails; stop the RV → he walks to the driver window → hand him the card = $50 (+$25 per extra heat, +$50 if you fled) and heat resets. Driving off mid-ticket = +2 heat and rams
 - [x] Loan Shark: matte-black spiked muscle car spawns ~12 s after the card goes negative, rams every 8–12 s (speed + yaw kick, jolt, −4 integrity), bullhorn threats; peels off once balance ≥ $0
 - [x] HUD warnings, siren audio, mirror shows pursuers
+- [x] **Outrunning** (`CHASE` in `config.ts`): Roscoe tops out at ~175 mph and the shark at ~170, below the RV's ~198. Stay more than 280 m ahead for 8 s (after a 15 s grace) and you lose them. Losing Roscoe = −1 heat, and he's back in 75 s if heat is still above 0. The shark comes back after 60 s while the card is negative. The mafia Cadillac can't be outrun. Test: `npx tsx scripts/sim-chase.ts`
 - [x] Fix: cabin acceleration clamped to ~1.3 g and props can only leave through the open door (crashes used to fling everything through the walls)
 - Tests: `npx tsx scripts/sim-phase4.ts`, `npx tsx scripts/sim-containment.ts`
 ### Phase 5 — Route, forks, night, weather, finale, stops  ← **built, needs human playtest**
@@ -327,7 +328,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] **Model polish pass**: `models/Character.ts` (one procedural builder: bean + human, faces w/ blinking, arms/hands, hats, walk/sit/hold/eat/slap/wave animations, talk mouth) · `models/npcs.ts` cast (Cletus, Roscoe, Flo, Earl, Dusty, bouncer) · `rv/RVPolish.ts` (textured wood/vinyl/carpet, curtains, window trim, rounded roof rails, fender arcs, mirrors, plate; dents / rust / cracked windshield by integrity; flat tire shows rim) · traffic rebuilt from side-profile extrusions (sedan, pickup, camper, **semi** (new), cop, shark) with drivers, rolling wheels, brake lights, turn signals, hazards · item meshes (sesame burgers, extinguisher w/ gauge+hose, hammer, tape, jugs, cans, map, jerrycan)
 - [x] RV acceleration raised ~65% (0–60 ≈ 7.5 s, top speed still ~104 mph)
 - Dev: `game.dummy(id, pose)` spawns a fake crewmate
-- [x] **Speed rework**: 6-lane highway (3 each way), speed limit **120 mph** (radar tickets above 127), **7-speed gearbox** (R N 1–7, tops 30/56/84/114/146/178/208 mph, ~198 mph real top, 0–60 ≈ 6 s), speedometer to 240. Route doubled to **500 base miles** (forks at 200 / 340, stops at 100 / 240 / 380 / 460; branch deltas ×2) so a run still takes about an hour; forks stretch (1500 m split, lock 650 m past), traffic 40–70 m/s with 3-lane overtaking + longer sight lines, chasers up to ~210 mph. Stop frames sit beside the wider road
+- [x] **Speed rework**: 6-lane highway (3 each way), speed limit **120 mph** (radar tickets above 127), **7-speed gearbox** (R N 1–7, tops 30/56/84/114/146/178/208 mph, ~198 mph real top, 0–60 ≈ 6 s), speedometer to 240. Route doubled to **500 base miles** (forks at 200 / 340, stops at 100 / 240 / 380 / 460; branch deltas ×2) so a run still takes about an hour; forks stretch (1500 m split, lock 650 m past), traffic 40–70 m/s with 3-lane overtaking + longer sight lines, chasers ~170–175 mph (outrunnable, see Phase 4). Stop frames sit beside the wider road
 - [x] **Tires**: blowouts only from rare tire debris (2% of chunks), 60% chance per hit, plus a 90 s no-blowout grace after any flat or repair; potholes ~40% rarer
 - [x] **Side mirrors**: live left/right mirror views beside the cab windows (rear-view mirror far plane fixed too). **Skull charm** hangs from the driver's mirror with pendulum physics (swings with accel/turns, streams back at speed) — rub it (E/click) for a random dark quote
 - [x] **Radio podcast** — 5th station *VOID 91.3, The Void Cast*: Mortimer Graves + Pip trade very dark comedy bits (some react to storms, cops, the loan shark, night, groom texts)
@@ -351,7 +352,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
     - Siphon is **Suck & Pinch**: hold to suck, release in the green band.
     - Strip is **Wrench Timing**: click in the green arc, once per bolt.
     - The client sends `rusty:carN:ok|fail` to the host.
-    - Pass → 80% clean. Fail → +1 heat and a chase.
+    - Pass → 90% clean (10% the owner spots you). Fail → +1 heat and a chase. Both games were made easier: wider green zones, a slower pointer and fill, and 3 siphon tries.
     - The wash car and the SUV have alarms.
   - The RV starts with 2 full 5-gal jerrycans. Test: `npx tsx scripts/sim-phase9.ts`
 - [x] **Health, canyon dangers, crash physics, bribes, livelier stops** (test: `npx tsx scripts/sim-phase10.ts`):
@@ -428,7 +429,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Ostrich**: races the RV on the shoulder (~42 mph). Throw it food → tamed; it follows, hops in through the open door, pecks standing players, and pays a $70 reward at the next stop.
   - **Lost suitcase**: run it over = clothes everywhere. Grab it and LMB to open: 35% cash, 35% an item, 20% a **rattlesnake** (item `snake`, slithers to the nearest standing player and bites −8; grab it and throw it out the door), 10% Hawaiian shirts.
   - **Road work**: 450 m zone, lanes 1–2 coned off, flagger with STOP (25 s) / SLOW (15 s), arrow board, workers, 45 MPH. Running STOP, speeding through, or making a worker dive = +1 heat each. Hit cones fly; 30% one jams under the bumper (scraping, drag) until a mechanic pulls it (`enc:cone`).
-  - **Train crossing**: bells + flashers when you're ~9 s away, gates drop, a 22–36 car freight train crosses at 22 m/s. Train hits the RV = −35. Squeeze across first = "BEAT THE TRAIN". Snapping a gate in front of Roscoe = +1 heat.
+  - **Train crossing**: bells + flashers when you're ~9 s away, gates drop, a 22–36 car freight train crosses at 22 m/s. The engineer's horn (long-long-short-long, muffled by distance) carries ~2.5 km, so you hear the train before you see it. Train hits the RV = −35. Squeeze across first = "BEAT THE TRAIN". Snapping a gate in front of Roscoe = +1 heat.
   - New sounds: moo, hiss, train horn, scrape, squawk.
   - Dev (`?dev`): **F5** cycles encounter kinds ahead of the RV; `game.enc('train', 300)` forces one at a distance.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV

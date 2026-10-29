@@ -16,6 +16,9 @@ export interface AudioFrame {
 export interface Volumes { master: number; vehicle: number; effects: number; radio: number }
 export const DEFAULT_VOLUMES: Volumes = { master: 0.8, vehicle: 0.8, effects: 0.9, radio: 0.7 };
 
+/** One-shots that carry up to 2.5 km (positional, muffled by distance). */
+const FAR = new Set(['trainhorn']);
+
 export class Sound {
   ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -267,12 +270,19 @@ export class Sound {
     if (at) {
       const L = this.listener;
       const dx = at[0] - L.x, dz = at[2] - L.z, d = Math.hypot(dx, dz);
-      if (d > 150) return;
-      const g = this.ctx.createGain(); g.gain.value = 1 / (1 + Math.max(0, d - 12) / 12);
+      const far = FAR.has(name); // loud things (a train horn) carry across the desert, muffled
+      if (d > (far ? 2500 : 150)) return;
+      const g = this.ctx.createGain();
+      g.gain.value = far ? 1 / (1 + Math.max(0, d - 30) / 260) : 1 / (1 + Math.max(0, d - 12) / 12);
       const p = this.ctx.createStereoPanner(); p.pan.value = d > 0.5 ? Math.max(-0.8, Math.min(0.8, (dx * L.rx + dz * L.rz) / d)) : 0;
-      g.connect(p).connect(this.sfxBus);
+      const nodes: AudioNode[] = [g, p];
+      if (far) {
+        const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600 + 7000 / (1 + d / 120);
+        g.connect(lp).connect(p); nodes.push(lp);
+      } else g.connect(p);
+      p.connect(this.sfxBus);
       this.dest = g;
-      setTimeout(() => { g.disconnect(); p.disconnect(); }, 6000);
+      setTimeout(() => nodes.forEach((n) => n.disconnect()), far ? 9000 : 6000);
     }
     try { this.oneShot(name); } finally { this.dest = this.sfxBus; }
   }
@@ -328,7 +338,10 @@ export class Sound {
       case 'crunch': this.noiseBurst(0.35, 900, 0.7); this.noiseBurst(0.25, 2800, 0.35, 0.04, 'highpass'); this.tone(90, 45, 0.3, 'sine', 0.6); break;
       case 'moo': this.tone(150, 118, 0.9, 'sawtooth', 0.22); this.tone(300, 236, 0.9, 'triangle', 0.08); break;
       case 'hiss': this.noiseBurst(0.9, 5200, 0.28, 0, 'highpass'); for (let i = 0; i < 6; i++) this.noiseBurst(0.04, 6500, 0.12, 0.9 + i * 0.05, 'highpass'); break;
-      case 'trainhorn': for (const [f, d] of [[311, 0], [370, 0], [466, 0], [311, 1.4], [370, 1.4], [466, 1.4]] as const) this.tone(f, f * 0.98, 1.1, 'sawtooth', 0.09, d); break;
+      case 'trainhorn': // long, long, short, long — the grade-crossing signal
+        for (const [d, len] of [[0, 1.1], [1.3, 1.1], [2.6, 0.4], [3.15, 1.3]] as const)
+          for (const f of [311, 370, 466]) this.tone(f, f * 0.985, len, 'sawtooth', 0.09, d);
+        break;
       case 'scrape': this.noiseBurst(0.45, 3200, 0.16, 0, 'highpass'); this.tone(220, 180, 0.4, 'square', 0.03); break;
       case 'squawk': this.tone(700, 1300, 0.12, 'sawtooth', 0.18); this.tone(1300, 600, 0.18, 'sawtooth', 0.16, 0.12); this.tone(800, 1400, 0.1, 'square', 0.08, 0.32); break;
       case 'jackpot': for (let i = 0; i < 8; i++) this.tone(880 + i * 110, 880 + i * 110, 0.12, 'square', 0.12, i * 0.09); break;

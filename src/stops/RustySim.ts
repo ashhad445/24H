@@ -367,7 +367,7 @@ export class RustySim {
 
   /**
    * Parked-car crime. The client runs a minigame (siphon: Suck & Pinch, strip: Wrench Timing) and
-   * reports `ok` / `fail`. Pass = 80% clean; fail = no loot and you're caught.
+   * reports `ok` / `fail`. Pass = 90% clean (10%: the owner sees and chases you); fail = no loot and you're caught.
    */
   private carAct(from: number, i: number, held: ItemState | undefined, res?: 'ok' | 'fail') {
     const c = this.r.cars[i];
@@ -375,7 +375,7 @@ export class RustySim {
     if (this.time - (this.heistAt.get(from) ?? -9) < 1) return true;
     this.heistAt.set(from, this.time);
     const alarm = i < 2; // the wash sedan and the SUV have alarms
-    const seen = res === 'fail' || Math.random() < 0.2;
+    const seen = res === 'fail' || Math.random() < 0.1;
     if (held?.k === 'jerrycan') {
       if (c.gas <= 0 || held.d >= 5) return true;
       if (res === 'ok') {

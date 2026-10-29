@@ -1,5 +1,5 @@
 // Host-only highway chaos: four-lane NPC traffic, radar traps, Sheriff Roscoe and the Loan Shark.
-import { CFG, RV } from '../config';
+import { CFG, CHASE, RV } from '../config';
 import { bonk, inRV, stepChase, type ChaseHost } from '../stops/chase';
 import { obbMtv } from '../stops/geom';
 import type { NPCState } from '../types';
@@ -43,6 +43,8 @@ export class TrafficSim {
   private noLimit = false;
   private wreckT = 0;
   private giggleT = 0;
+  /** seconds the active chaser has been left far behind (outrunning) */
+  private escape = new Map<number, { age: number; lose: number; warned: boolean }>();
   private rollV = new Map<number, number>(); // wreck id → barrel-roll rate (rad/s)
   private crashAt = new Map<number, number>();
   private prevZ: number | null = null;
@@ -114,7 +116,7 @@ export class TrafficSim {
 
   private removeNpc(id: number) {
     this.s.npcs = this.s.npcs.filter((n) => n.id !== id);
-    this.lanes.delete(id); this.rollV.delete(id); this.crashAt.delete(id);
+    this.lanes.delete(id); this.rollV.delete(id); this.crashAt.delete(id); this.escape.delete(id);
   }
 
   private time = 0;
@@ -478,7 +480,13 @@ export class TrafficSim {
 
     if (cop.phase === 1 || cop.phase === 2) {
       const [tx, tz] = this.behindRV(12);
-      this.drive(car, tx, tz, 100, dt, 1);
+      this.drive(car, tx, tz, CHASE.copV, dt, 1);
+      if (this.outrun(car, dt, dist)) {
+        this.s.npcs = this.s.npcs.filter((n) => n !== car);
+        cop.phase = 0; cop.fled = false; s.heat = Math.max(0, s.heat - 1); this.copDelay = 75;
+        this.h.toast(`🏁 You lost Roscoe! (−1 heat)${s.heat > 0 ? ' He\'ll be back…' : ''}`);
+        return;
+      }
       if (dist < 25) cop.phase = 2;
       this.stoppedT = Math.abs(rv.speed) < 0.6 && dist < 30 ? this.stoppedT + dt : 0;
       if (this.stoppedT > 2) {
@@ -534,7 +542,7 @@ export class TrafficSim {
         // stoned Roscoe tails you at a respectful distance, giggling on the bullhorn
         this.giggleT -= dt;
         const [tx, tz] = this.behindRV(22);
-        this.drive(car, tx, tz, 100, dt, 1);
+        this.drive(car, tx, tz, CHASE.copV, dt, 1);
         if (Math.floor(this.giggleT / 5) !== Math.floor((this.giggleT + dt) / 5)) { this.h.sfx('giggle', [car.x, 1.5, car.z]); this.h.toast(['🚔 *bullhorn* "hehehe… your RV is… so BIG, man"', '🚔 *bullhorn* "do you guys have… any more burgers"', '🚔 *bullhorn* "I LOVE you guys"', '🚔 *bullhorn* "what if the road… is driving US"'][Math.floor(Math.random() * 4)]); }
         cop.t = 0;
         return;
@@ -686,9 +694,15 @@ export class TrafficSim {
     }
     s.shark.t -= dt;
     const dist = Math.hypot(car.x - rv.x, car.z - rv.z);
+    // the loan shark can be outrun (the mafia after 24:00 can't)
+    if (!s.mafia.on && this.outrun(car, dt, dist)) {
+      this.removeNpc(car.id); s.shark.on = false; this.sharkDelay = 60;
+      this.h.toast('🏁 You smoked the Loan Shark! He\'ll find you again if the card stays negative.');
+      return;
+    }
     const attacking = s.shark.t <= 0;
     const [tx, tz] = this.behindRV(attacking ? 4 : 16, attacking ? (Math.random() < 0.5 ? -0.8 : 0.8) : 0);
-    this.drive(car, tx, tz, 98, dt, attacking ? 0 : 1);
+    this.drive(car, tx, tz, CHASE.sharkV, dt, attacking ? 0 : 1);
     if (attacking && dist < 7.2) {
       this.ram(car, 0.8);
       s.shark.t = 9 + Math.random() * 5;
@@ -697,6 +711,19 @@ export class TrafficSim {
     } else if (this.bullhornCd <= 0 && dist < 40) {
       this.bullhornCd = 15; this.h.sfx('bullhorn');
     }
+  }
+
+  /** Outrunning: true once the chaser has been left > loseDist behind for loseT s. */
+  private outrun(car: NPCState, dt: number, dist: number) {
+    let e = this.escape.get(car.id);
+    if (!e) { e = { age: 0, lose: 0, warned: false }; this.escape.set(car.id, e); }
+    e.age += dt;
+    if (e.age < CHASE.grace || dist < CHASE.loseDist) { e.lose = 0; e.warned = false; return false; }
+    e.lose += dt;
+    if (!e.warned && e.lose > CHASE.loseT / 2) { e.warned = true; this.h.toast('🏁 You\'re losing them… keep it floored!'); }
+    if (e.lose < CHASE.loseT) return false;
+    this.escape.delete(car.id);
+    return true;
   }
 
   /** A chaser smacks the RV from behind: speed kick, small yaw kick, jolt, a little damage. */
