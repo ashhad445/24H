@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CFG } from '../config';
+import { Assets, BAKED_MAT } from '../core/AssetLoader';
 import { FORKS, branchAt, chosen, forkZ, routeOffset, routeVersion, type Fork } from './Route';
 
 // ---------- road centerline ----------
@@ -83,7 +84,7 @@ export function chunkHazards(i: number): Hazard[] {
       const z = z0 - r() * CHUNK;
       const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * 10.2);
       const [x, zz] = lateral(z, off);
-      h.push({ id: i * 100 + k, type: 'pothole', x, z: zz, r: 0.45 + r() * 0.35 });
+      h.push({ id: i * 100 + k, type: 'pothole', x, z: zz, r: 0.8 + r() * 0.6 });
     }
     if (r() < 0.02) { // rare: tire debris
       const z = z0 - r() * CHUNK;
@@ -97,11 +98,13 @@ export function chunkHazards(i: number): Hazard[] {
 /** Radar speed traps: one every few chunks on the right shoulder. Limit in MPH. */
 export const SPEED_LIMIT = 120;
 export interface Radar { id: number; x: number; z: number; yaw: number }
+/** Miles of every stop (Rusty's + the kit stops). Kept here so camera placement never depends on which stops are loaded. */
+export const STOP_MILES = [100, 240, 380, 460];
 export function chunkRadar(i: number): Radar | null {
-  if (i < 2 || i % 8 !== 3) return null;
+  if (i < 2 || i % 20 !== 3) return null;
   const z = -i * CHUNK - CHUNK * 0.3;
-  const [sx, sz] = lateral(z, ROAD_HALF + 2.3);
-  if (cleared(sx, sz)) return null;
+  // deterministic: no camera near a stop or inside a "SPEED UNTIL YOU DIE" stretch
+  if (noLimitAt(z) || STOP_MILES.some((m) => Math.abs(-m / CFG.MILES_PER_METER - z) < 800)) return null;
   const [x, zz] = lateral(z, 0); // the gantry spans the whole road
   return { id: i, x, z: zz, yaw: roadYaw(z) };
 }
@@ -196,7 +199,40 @@ const BILLBOARDS: { lines: string[]; bg: string; fg: string }[] = [
   { lines: ['LOST?', 'SO ARE WE', 'JESUS SAVES · GAS DOESN’T'], bg: '#ffffff', fg: '#222222' },
   { lines: ['ROSCOE IS', 'WATCHING', 'OBEY THE SPEED LIMIT'], bg: '#1b4f72', fg: '#ffffff' },
   { lines: ['NEED CASH?', 'NO QUESTIONS ASKED', '1-800-LOAN-SHARK'], bg: '#111111', fg: '#e74c3c' },
+  { lines: ['DIVORCE LAWYER', "YOU'LL NEED ONE", 'BY SUNDAY'], bg: '#0b3d2e', fg: '#ffd54f' },
+  { lines: ['HONK IF YOU', 'HATE YOUR JOB', 'THEN QUIT'], bg: '#fff3e0', fg: '#bf360c' },
+  { lines: ['MY EX IS', 'IN THE TRUNK', 'FREE RIDES'], bg: '#212121', fg: '#ff5252' },
+  { lines: ['CHEAP FUNERALS', 'DIE TODAY', 'SAVE 20%'], bg: '#1a1a2e', fg: '#e0e0e0' },
+  { lines: ['PREGNANT?', 'CALL YOUR MOM', "SHE'S HAD IT"], bg: '#fce4ec', fg: '#ad1457' },
+  { lines: ['BEER:', 'BECAUSE NO ONE', 'LOVES YOU SOBER'], bg: '#ffb300', fg: '#3e2723' },
+  { lines: ['VASECTOMY', 'SALE', 'SNIP SNIP HOORAY'], bg: '#00695c', fg: '#ffffff' },
+  { lines: ['YOUR WIFE IS', 'HOT. SO IS THE', 'CAR. LEFT INSIDE'], bg: '#d84315', fg: '#ffffff' },
+  { lines: ['THERAPY:', '$200/HR', 'BOURBON: $20/FIFTH'], bg: '#4e342e', fg: '#ffe0b2' },
+  { lines: ['ADULT SUPERSTORE', 'NEXT EXIT', 'OPEN 24/7 · NO SHAME'], bg: '#880e4f', fg: '#ffffff' },
+  { lines: ['TIRED OF BEING', 'DEPRESSED?', 'TRY MORE DEPRESSED'], bg: '#263238', fg: '#80cbc4' },
+  { lines: ['NO HOMELESS', 'IN THIS AD.', 'PLEASE PAY FOR ADS'], bg: '#fffde7', fg: '#33691e' },
+  { lines: ['CREMATION', "SPECIAL: YOU'LL", 'BE ASH-TONISHED'], bg: '#3e2723', fg: '#ff8f00' },
+  { lines: ['MARRIAGE IS', 'A WAR CRIME', 'AGAINST YOURSELF'], bg: '#ffffff', fg: '#b71c1c' },
+  { lines: ['IF YOU READ THIS', "YOU'RE PROBABLY", 'GOING TO DIE TOO'], bg: '#f5f5f5', fg: '#212121' },
+  { lines: ['WEED IS LEGAL', 'ONLY IN YOUR', 'TRUNK. HI ROSCOE'], bg: '#1b5e20', fg: '#c5e1a5' },
+  { lines: ['BOTOX CLINIC', 'LOOK SURPRISED', 'AT YOUR OWN FUNERAL'], bg: '#e1bee7', fg: '#4a148c' },
+  { lines: ['CHEATING?', "WE DON'T JUDGE.", 'MOTEL 6 DOES.'], bg: '#0d47a1', fg: '#ffeb3b' },
 ];
+
+/** The billboard that lifts the speed limit: index in the sign list is BILLBOARDS.length. */
+export const DEATH_SIGN_EVERY = 12;
+export const NO_LIMIT_LEN = 3000;
+const deathSignZ = (i: number) => -i * CHUNK - CHUNK * 0.5;
+/** Passed a "SPEED UNTIL YOU DIE" board in the last 3 km? Cameras are blind there. */
+export function noLimitAt(z: number): boolean {
+  const ci = Math.floor(-z / CHUNK);
+  for (let i = Math.max(7, ci - 12); i <= ci; i++) {
+    if (i % DEATH_SIGN_EVERY !== 7) continue;
+    const sz = deathSignZ(i);
+    if (z < sz && z > sz - NO_LIMIT_LEN) return true;
+  }
+  return false;
+}
 
 interface Chunk { i: number; group: THREE.Group; disposables: THREE.BufferGeometry[] }
 
@@ -214,6 +250,7 @@ export class World {
   private signTex: THREE.Texture[];
   private radarTex: THREE.Texture;
   private warnTex: THREE.Texture[];
+  private holeTex!: { road: THREE.Texture[]; canyon: THREE.Texture[]; rock: THREE.Texture };
   private sunDir = new THREE.Vector3(0.3, 0.6, -0.4).normalize();
   /** 0 = night, 1 = full day */
   daylight = 1;
@@ -305,7 +342,10 @@ export class World {
       mesa: new THREE.MeshStandardMaterial({ color: '#b5653e', roughness: 1, flatShading: true }),
       wood: new THREE.MeshStandardMaterial({ color: '#6b4a2e', roughness: 1 }),
       post: new THREE.MeshStandardMaterial({ color: '#888888', roughness: 0.6, metalness: 0.4 }),
-      pothole: new THREE.MeshStandardMaterial({ color: '#1c1c1f', roughness: 1 }),
+      pothole: new THREE.MeshStandardMaterial({ color: '#0b0b0d', roughness: 1 }),
+      patch: new THREE.MeshStandardMaterial({ color: '#7a7a80', roughness: 1 }),
+      spray: new THREE.MeshStandardMaterial({ color: '#ff6d00', emissive: '#ff3d00', emissiveIntensity: 0.7, roughness: 0.8 }),
+      warnYellow: new THREE.MeshStandardMaterial({ color: '#ffd600', roughness: 0.6 }),
       tire: new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.9 }),
     };
     this.geos = {
@@ -316,10 +356,15 @@ export class World {
       mesa: new THREE.CylinderGeometry(0.75, 1, 1, 7).translate(0, 0.5, 0),
       pole: buildPole(),
       pothole: new THREE.CircleGeometry(1, 9).rotateX(-Math.PI / 2),
+      sprayRing: new THREE.RingGeometry(0.92, 1.05, 18).rotateX(-Math.PI / 2),
+      cone: new THREE.ConeGeometry(0.22, 0.75, 10).translate(0, 0.375, 0),
+      signPost: new THREE.BoxGeometry(0.1, 2.4, 0.1).translate(0, 1.2, 0),
+      holeSign: new THREE.PlaneGeometry(1.8, 0.9),
       debris: new THREE.TorusGeometry(0.22, 0.06, 5, 8, Math.PI * 0.8),
       cliff: new THREE.BoxGeometry(1, 1, 1, 2, 3, 2).translate(0, 0.5, 0),
     };
     this.signTex = BILLBOARDS.map((b) => signTexture(b.lines, b.bg, b.fg));
+    this.signTex.push(signTexture(['SPEED UNTIL', 'YOU DIE', 'NO LIMIT FOR 3 KM'], '#b71c1c', '#ffffff'));
     this.radarTex = (() => {
       const c = document.createElement('canvas'); c.width = 128; c.height = 160;
       const g = c.getContext('2d')!;
@@ -330,6 +375,22 @@ export class World {
       g.fillStyle = '#c62828'; g.font = 'bold 13px Arial'; g.fillText('CAMERA ENFORCED', 64, 146);
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
     })();
+    // hand-painted plywood pothole warnings (the canyon ones were painted by someone who never went to school)
+    const plywood = (txt: string, ink: string) => {
+      const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+      const g = c.getContext('2d')!;
+      g.fillStyle = '#d7b27a'; g.fillRect(0, 0, 256, 128);
+      g.strokeStyle = '#a07a45'; g.lineWidth = 2; for (let y = 14; y < 128; y += 22) { g.beginPath(); g.moveTo(0, y); g.lineTo(256, y + 4); g.stroke(); }
+      g.fillStyle = ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const lines = txt.split('\n');
+      lines.forEach((l, k) => { g.font = `bold ${lines.length > 1 ? 34 : 54}px "Comic Sans MS", "Arial Black", sans-serif`; g.fillText(l, 128, 128 / (lines.length + 1) * (k + 1)); });
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+    };
+    this.holeTex = {
+      road: ['HOLE', 'BIG HOLE', 'SORRY ABOUT\nTHE HOLE', 'HOLE AHEAD\n(MINE)', 'NOT A\nSHORTCUT'].map((t, k) => plywood(t, k % 2 ? '#b71c1c' : '#111')),
+      canyon: ['HOAL', 'BIG HOAL!!', 'U GONNA\nDIE (HOAL)', 'HOAL →\n← HOAL'].map((t) => plywood(t, '#b71c1c')),
+      rock: plywood('FALLING ROCK\nGOOD LUCK', '#111'),
+    };
     this.warnTex = [500, 250].map((m) => {
       const c = document.createElement('canvas'); c.width = 128; c.height = 128;
       const g = c.getContext('2d')!;
@@ -501,13 +562,31 @@ export class World {
         for (const side of [-1, 1]) {
           const [x, zz] = lateral(z, side * (ROAD_HALF + 14 + rc() * 7));
           if (onRoad(x, zz, 14)) continue; // keep clear of the other branch near the fork
+          // a cliff block is ~18 x 24 m: keep the whole footprint out of stop lots (the junkyard)
+          if ([[0, 0], [-10, -13], [10, -13], [-10, 13], [10, 13]].some(([dx, dz]) => cleared(x + dx, zz + dz))) continue;
           cliffs.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rc() * 0.6, 0)), new THREE.Vector3(10 + rc() * 8, 16 + rc() * 22, 24)));
         }
       }
-      const im = new THREE.InstancedMesh(this.geos.cliff, this.mats.mesa, cliffs.length);
-      cliffs.forEach((m, j) => im.setMatrixAt(j, m));
-      im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
-      group.add(im);
+      const cv = sceneryVariants('cliff') ?? [this.geos.cliff];
+      cv.forEach((geo, v) => {
+        const mine = cliffs.filter((_, j) => j % cv.length === v);
+        if (!mine.length) return;
+        const im = new THREE.InstancedMesh(geo, geo !== this.geos.cliff ? BAKED_MAT : this.mats.mesa, mine.length);
+        mine.forEach((m, j) => im.setMatrixAt(j, m));
+        im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
+        group.add(im);
+      });
+      // one "FALLING ROCK — GOOD LUCK" sign per chunk
+      const sz = z0 - CHUNK * 0.6;
+      const [sx, szz] = lateral(sz, ROAD_HALF + 2.4);
+      if (!onRoad(sx, szz, 4)) {
+        const sg = new THREE.Group();
+        const post = new THREE.Mesh(this.geos.signPost, this.mats.post);
+        const diamond = new THREE.Mesh(this.geos.holeSign, new THREE.MeshStandardMaterial({ map: this.holeTex.rock, roughness: 0.7, emissive: new THREE.Color('#333'), emissiveMap: this.holeTex.rock }));
+        diamond.position.set(0, 2.0, 0.06);
+        sg.add(post, diamond); sg.position.set(sx, 0, szz); sg.rotation.y = roadYaw(sz);
+        group.add(sg);
+      }
     }
 
     // props (instanced per type)
@@ -542,6 +621,19 @@ export class World {
     }
     for (const [key, list] of Object.entries(place)) {
       if (!list.length) continue;
+      const vars = sceneryVariants(key);
+      if (vars) {
+        // Blender models: deal the instances out over the variants
+        vars.forEach((geo, v) => {
+          const mine = list.filter((_, j) => j % vars.length === v);
+          if (!mine.length) return;
+          const im = new THREE.InstancedMesh(geo, BAKED_MAT, mine.length);
+          mine.forEach((m, j) => im.setMatrixAt(j, m));
+          im.castShadow = key !== 'mesa'; im.receiveShadow = true; im.computeBoundingSphere();
+          group.add(im);
+        });
+        continue;
+      }
       const mat = key === 'saguaro' || key === 'barrel' ? this.mats.cactus : key === 'pole' ? this.mats.wood : this.mats[key];
       const im = new THREE.InstancedMesh(this.geos[key], mat, list.length);
       list.forEach((m, j) => im.setMatrixAt(j, m));
@@ -554,9 +646,32 @@ export class World {
     // hazards
     for (const hz of chunkHazards(i)) {
       if (hz.type === 'pothole') {
-        const m = new THREE.Mesh(this.geos.pothole, this.mats.pothole);
-        m.position.set(hz.x, 0.004, hz.z); m.scale.set(hz.r, 1, hz.r * (0.7 + (hz.id % 5) * 0.08)); m.rotation.y = hz.id;
-        m.receiveShadow = true; group.add(m);
+        // cracked grey patch, black hole, and a fluorescent spray-paint ring someone painted around it
+        const sq = 0.7 + (hz.id % 5) * 0.08;
+        const pg = new THREE.Group();
+        const patch = new THREE.Mesh(this.geos.pothole, this.mats.patch); patch.position.y = 0.004; patch.scale.set(hz.r * 1.45, 1, hz.r * 1.45 * sq);
+        const hole = new THREE.Mesh(this.geos.pothole, this.mats.pothole); hole.position.y = 0.008; hole.scale.set(hz.r, 1, hz.r * sq);
+        const ring = new THREE.Mesh(this.geos.sprayRing, this.mats.spray); ring.position.y = 0.012; ring.scale.set(hz.r * 1.6, 1, hz.r * 1.6 * sq);
+        pg.add(patch, hole, ring);
+        if (hz.id % 3 === 0) { const cone = new THREE.Mesh(this.geos.cone, this.mats.spray); cone.position.set(hz.r * 1.9, 0, 0); cone.castShadow = true; pg.add(cone); }
+        pg.position.set(hz.x, 0, hz.z); pg.rotation.y = hz.id;
+        group.add(pg);
+        // every third one gets a hand-painted warning sign 200 m before it
+        if (hz.id % 3 === 0) {
+          const z = hz.z + 200;
+          const canyon = !!branchAt(z)?.canyon;
+          const pool = canyon ? this.holeTex.canyon : this.holeTex.road;
+          const tex = pool[hz.id % pool.length];
+          const [wx, wz] = lateral(z, ROAD_HALF + 2.2);
+          if (!cleared(wx, wz)) {
+            const sg = new THREE.Group();
+            const post = new THREE.Mesh(this.geos.signPost, this.mats.wood);
+            const plate = new THREE.Mesh(this.geos.holeSign, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, emissive: new THREE.Color('#2a2a2a'), emissiveMap: tex }));
+            plate.position.set(0, 1.9, 0.06); plate.rotation.z = ((hz.id % 7) - 3) * 0.04; // nailed on crooked
+            sg.add(post, plate); sg.position.set(wx, 0, wz); sg.rotation.y = roadYaw(z);
+            group.add(sg);
+          }
+        }
       } else {
         const g = new THREE.Group();
         for (let k = 0; k < 4; k++) {
@@ -608,7 +723,7 @@ export class World {
       const z = z0 - CHUNK * 0.5;
       const [x, zz] = lateral(z, ROAD_HALF + 12);
       const bb = new THREE.Group();
-      const tex = this.signTex[Math.floor(i / 3) % this.signTex.length];
+      const tex = i >= 7 && i % DEATH_SIGN_EVERY === 7 ? this.signTex[BILLBOARDS.length] : this.signTex[Math.floor(i / 3) % BILLBOARDS.length];
       const board = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.2), [
         this.mats.wood, this.mats.wood, this.mats.wood, this.mats.wood,
         new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }), this.mats.wood,
@@ -659,6 +774,24 @@ function markerTex(mile: number) {
   markerCache.set(mile, t);
   return t;
 }
+
+/** Which desert.glb nodes stand in for each scenery kind (null = use the procedural geometry). */
+const VARIANT_PREFIX: Record<string, string[]> = {
+  saguaro: ['saguaro_', 'saguaro_', 'joshua_'], barrel: ['barrel_', 'prickly_'], rock: ['rock_'], shrub: ['shrub_'],
+  mesa: ['mesa_'], pole: ['pole_'], cliff: ['cliff_'],
+};
+const variantCache = new Map<string, THREE.BufferGeometry[] | null>();
+function sceneryVariants(key: string): THREE.BufferGeometry[] | null {
+  if (!Assets.ready) return null;
+  if (variantCache.has(key)) return variantCache.get(key)!;
+  const geos: THREE.BufferGeometry[] = [];
+  for (const p of VARIANT_PREFIX[key] ?? []) for (const n of Assets.names('desert', p)) { const g = Assets.baked('desert', n); if (g) geos.push(g); }
+  const out = geos.length ? geos : null;
+  variantCache.set(key, out);
+  return out;
+}
+// models arrive after the first chunks are built: rebuild them once
+Assets.onReady(() => { variantCache.clear(); sceneryVersion++; });
 
 function buildSaguaro() {
   const parts = [

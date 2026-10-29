@@ -13,6 +13,23 @@ const L = (m: string, p: string, ...rest: string[]): Line[] => {
 };
 
 const BITS: Line[][] = [
+  L(`Pip, my wife says I'm emotionally unavailable.`, `She's right. You're only available on weekends, and only after three drinks.`, `Fair. Put that on my tombstone.`, `We already put it on your tab.`),
+  L(`I finally slept with my therapist.`, `Mort! That's unethical.`, `It was the only way to get a refund.`),
+  L(`Pip, how do you pick up women at a funeral?`, `You don't. You wait for the widow to become single and available. That's called "patience."`, `That's called "a felony," Pip.`, `Potato, felony.`),
+  L(`A man in Reno was caught selling weed to a cop. He said he thought it was a plant.`, `Of the cop kind or the weed kind?`, `Both. He had a lot of bad ideas that week.`),
+  L(`My mother taught me everything I know about love.`, `Like what?`, `That it's temporary and expensive and sometimes arrives in a casket.`),
+  L(`A listener asks: "Is it okay to cry during sex?"`, `Only if you're doing it right. Or wrong. Honestly, it's a coin flip with feelings.`, `Pip, you're an inspiration to the coroner's office.`),
+  L(`I'd like to thank my ex for the experience.`, `Which one?`, `The experience of watching someone I love pack a bag at 3 a.m. We should all be so lucky.`),
+  L(`Today's weather: a ninety percent chance of regret, with scattered showers of bad decisions.`, `And a cold front of your father's disappointment moving in from the east.`),
+  L(`Pip, my doctor says I need to cut back on drinking, smoking, and sex.`, `Which one are you keeping?`, `The one that doesn't require a second person to walk out on me.`),
+  L(`Folks, our sponsor tonight is Casket Direct. Because why wait for the discount?`, `Their slogan: "Coffins so comfy you'll die to try them."`, `Pip, that's a tort.`, `It's a coffin, Mort. It's a box with ambition.`),
+  L(`I read that the human body is sixty percent water.`, `That's why when I get stabbed, I make a puddle and a poor decision.`),
+  L(`Prostitution is the world's oldest profession, Pip.`, `Second oldest. The first is whoever invented the bill.`, `And third is the guy who walks in and says, "I thought this was a dentist."`),
+  L(`Pip, what's the difference between a politician and a stray dog?`, `The dog has fleas but also loyalty.`, `That's the whole joke?`, `I'm saving the rest for the sentencing.`),
+  L(`It's Friday night. Somewhere, a man is making a terrible decision with a stranger.`, `Mort, that's you. That's every Friday.`, `Yes. And God willing, it'll be the death of me.`),
+  L(`New study: people who drink wine daily live longer.`, `Which is great news for the vineyards and the people who lived long enough to regret it.`),
+  L(`I told my kid there's no Santa. He told me there's no daddy. We're even.`, `Mort, you're a monster.`, `I'm a realist with a mortgage.`),
+  L(`My neighbour's a drug dealer. Nice guy. Never late with the product, never early with the apology.`, `Does he deliver?`, `Everything but justice.`),
   L(`Welcome back to The Void Cast, the only podcast recorded in a bunker, for a bunker.`, `Mort, it's a studio apartment. The bunker is metaphorical.`, `Pip, everything is metaphorical. That's what the void is for.`),
   L(`Today's topic: the afterlife. Is it real?`, `Great question. I called the afterlife for a comment and it left me on hold.`, `So, yes. Hell. It's hell. Customer service is hell.`),
   L(`A listener writes: "My doctor says I have six months to live." Pip, advice?`, `Tell him to book the dentist for month seven. Be efficient with your hope.`),

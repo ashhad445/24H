@@ -47,6 +47,22 @@ export class StopsHost {
     return true;
   }
 
+  /** Eating / using unpaid stock: the shop it happened in reacts. */
+  unpaid(from: number): boolean {
+    for (const { def, ctx } of this.active.values()) {
+      for (const p of def.parts) if (p.unpaid?.(ctx, this.base.s.stops[def.id][p.id], from)) return true;
+    }
+    return false;
+  }
+
+  /** A stop part that owns this food (challenge burgers…) gets to handle the bite. */
+  eat(from: number, it: ItemState): boolean {
+    for (const { def, ctx } of this.active.values()) {
+      for (const p of def.parts) if (p.eat?.(ctx, this.base.s.stops[def.id][p.id], from, it)) return true;
+    }
+    return false;
+  }
+
   /** Is this nozzle one of ours? Then pump from its stop. */
   pumpInto(from: number, nozzle: ItemState): boolean {
     if (nozzle.d < PUMP_BASE) return false;
@@ -65,7 +81,7 @@ export class StopsView {
   readonly root = new THREE.Group();
   private built = new Map<string, { def: StopDef; group: THREE.Group; ctx: ViewCtx; prompts: Map<string, Prompt> }>();
 
-  constructor(scene: THREE.Scene, private statics: StaticSet[], private play: (n: string) => void) {
+  constructor(scene: THREE.Scene, private statics: StaticSet[], private play: (n: string, at?: [number, number, number]) => void) {
     scene.add(this.root);
   }
 
@@ -92,7 +108,11 @@ export class StopsView {
         const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: signTexture(lines, bg, px, py) }));
         group.add(m); return m;
       },
-      play: this.play,
+      play: (n, at) => {
+        if (!at) return this.play(n);
+        const w = group.localToWorld(new THREE.Vector3(...at));
+        this.play(n, [w.x, w.y, w.z]);
+      },
     };
     for (const p of def.parts) { current = p.id; p.build(ctx); }
     this.built.set(def.id, { def, group, ctx, prompts });

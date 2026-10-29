@@ -8,6 +8,7 @@ export class Input {
   private buttons = new Set<number>();
   mouseDX = 0;
   mouseDY = 0;
+  wheel = 0;
   locked = false;
   sensitivity = 0.0022;
 
@@ -29,6 +30,7 @@ export class Input {
       this.buttons.add(e.button);
     });
     addEventListener('mouseup', (e) => this.buttons.delete(e.button));
+    addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('mousemove', (e) => {
       if (!this.locked) return;
@@ -54,5 +56,6 @@ export class Input {
     this.clicks.clear();
     this.mouseDX = 0;
     this.mouseDY = 0;
+    this.wheel = 0;
   }
 }

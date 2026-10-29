@@ -88,6 +88,7 @@ export const RADIO_STATIONS = [
   { freq: '103.5', call: 'MIRAGE', tag: 'Smooth Lounge', genre: 'lounge' },
   { freq: 'AM 1220', call: 'KDST', tag: 'Desert Talk', genre: 'talk' },
   { freq: 'FM 91.3', call: 'VOID', tag: 'The Void Cast (dark comedy)', genre: 'podcast' },
+  { freq: '107.7', call: 'KRYP', tag: 'Murder Ballads & Grave Surf', genre: 'surf' },
 ] as const;
 
 export const DEV = typeof location !== 'undefined' && new URLSearchParams(location.search).has('dev');
@@ -103,4 +104,15 @@ export const SURV = {
   FIRE_AT: 1.6, // cook progress where the grease ignites
   BREW_TIME: 20,
   FUSE_JOLT: 0.8,
+};
+
+/** Health (per player, host). Rates are hp per second. */
+export const HP = {
+  STARVING_BELOW: 20, STARVING: 1 / 6, // hungry: slow drain
+  EMPTY: 1 / 2, // hunger at 0: faster
+  REGEN_ABOVE: 60, REGEN: 1 / 4,
+  CRASH: 15, // × jolt magnitude, only if standing
+  BONK: 10,
+  POISON: 15, // raw / burnt food
+  WAKE_HP: 35, ER_BILL: 40, KO_SEC: 8,
 };

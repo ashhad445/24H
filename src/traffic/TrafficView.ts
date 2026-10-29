@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { makeNpc } from '../models/npcs';
 import type { RVModel } from '../rv/RV';
+import { chaserPose } from '../stops/chaseView';
 import { NPC_DIMS } from './TrafficSim';
 import type { NPCState, SharedState } from '../types';
 
@@ -60,8 +61,9 @@ function buildVehicle(k: NPCState['k'], c: number): View {
   const tail = new THREE.MeshStandardMaterial({ color: '#7a0000', emissive: '#ff1a1a', emissiveIntensity: 0.35 });
   const sigL = new THREE.MeshStandardMaterial({ color: '#8a5a00', emissive: '#ffa000', emissiveIntensity: 0 });
   const sigR = sigL.clone();
+  g.rotation.order = 'YXZ'; // yaw first, then roll about the car's own length
   const view: View = { g, k, heads, tail, sigL, sigR, wheels: [], wheelR: 0.34, lastSpeed: 0, brakeT: 0, sigT: 0 };
-  const paintC = k === 'cop' ? '#f5f5f5' : k === 'shark' ? '#18181b' : PAINT[c % PAINT.length];
+  const paintC = k === 'cop' ? '#f5f5f5' : k === 'shark' ? '#18181b' : k === 'bandit' ? '#6d6a64' : PAINT[c % PAINT.length];
   const paint = new THREE.MeshStandardMaterial({ color: paintC, roughness: k === 'shark' ? 0.85 : 0.35, metalness: k === 'shark' ? 0.1 : 0.35 });
   const [hw, hl] = NPC_DIMS[k];
   const w = hw * 2, l = hl * 2, f = -hl, b = hl; // front / back z
@@ -84,7 +86,7 @@ function buildVehicle(k: NPCState['k'], c: number): View {
     box(g, chrome, w + 0.05, 0.14, 0.12, 0, 0.45, f - 0.02);
     box(g, chrome, w + 0.05, 0.14, 0.12, 0, 0.45, b + 0.02);
     lights(0.7);
-  } else if (k === 'pickup') {
+  } else if (k === 'pickup' || k === 'bandit') {
     prof(g, paint, [[f, 0.4], [f, 0.95], [f + 0.8, 1.05], [f + 2.2, 1.1], [f + 2.2, 0.4]], w); // hood + cab base
     prof(g, paint, [[f + 2.0, 1.0], [f + 2.2, 1.0], [f + 2.2, 1.85], [f + 3.0, 1.85], [f + 3.3, 1.05], [f + 3.3, 1.0]], w * 0.95, 0.06); // cab
     prof(g, glass, [[f + 2.4, 1.1], [f + 2.45, 1.75], [f + 2.9, 1.75], [f + 3.15, 1.1]], w * 0.97, 0.03);
@@ -92,7 +94,17 @@ function buildVehicle(k: NPCState['k'], c: number): View {
     box(g, black, w * 0.9, 0.06, 1.9, 0, 0.8, b - 1.0);
     for (const s of [-1, 1]) prof(g, paint, [[b - 2.0, 0.4], [b - 2.0, 1.15], [b, 1.15], [b, 0.4]], 0.14, 0.03, s * (hw - 0.07));
     box(g, paint, w * 0.95, 0.75, 0.1, 0, 0.78, b - 0.04);
-    driver(g, -hw * 0.45, 1.1, f + 2.9, '#a1887f');
+    driver(g, -hw * 0.45, 1.1, f + 2.9, k === 'bandit' ? '#b71c1c' : '#a1887f');
+    if (k === 'bandit') {
+      queueMicrotask(() => g.traverse((o) => { o.userData.iid = 'bandit'; })); // after the wheels are added
+      // two more goons standing in the bed, red bandanas, a cow skull on the hood, rust patches
+      driver(g, -hw * 0.4, 1.35, b - 1.2, '#b71c1c'); driver(g, hw * 0.4, 1.35, b - 0.6, '#b71c1c');
+      const bone = new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.9 });
+      box(g, bone, 0.35, 0.14, 0.4, 0, 1.1, f + 0.4);
+      for (const s of [-1, 1]) { const horn = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.45, 6).rotateZ(s * Math.PI / 2), bone); horn.position.set(s * 0.38, 1.15, f + 0.35); g.add(horn); }
+      const rust = new THREE.MeshStandardMaterial({ color: '#8d4a24', roughness: 1 });
+      for (const [x, y, z] of [[hw + 0.01, 0.7, f + 0.8], [-hw - 0.01, 0.6, b - 0.6], [hw + 0.01, 0.9, b - 1.3]]) box(g, rust, 0.02, 0.3, 0.6, x, y, z);
+    }
     box(g, chrome, w + 0.05, 0.16, 0.14, 0, 0.5, f - 0.03);
     box(g, chrome, w + 0.05, 0.14, 0.12, 0, 0.5, b + 0.03);
     lights(0.82);
@@ -174,6 +186,7 @@ function buildRoscoe() {
 export class TrafficView {
   private views = new Map<number, View>();
   private roscoe = buildRoscoe();
+  private footRoscoe = makeNpc('roscoe'); // not interactable: you can't pay a man who is tasing you
 
   constructor(private scene: THREE.Scene, rv: RVModel) {
     // Roscoe stands at the driver's window (RV-local, untilted root so he stays upright)
@@ -181,6 +194,10 @@ export class TrafficView {
     this.roscoe.rotation.y = -Math.PI / 2; // face +x, toward the RV
     this.roscoe.visible = false;
     rv.root.add(this.roscoe);
+    const taser = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.22), new THREE.MeshStandardMaterial({ color: '#ffd600', emissive: '#665500' }));
+    taser.position.set(0.3, 1.2, -0.35); this.footRoscoe.add(taser);
+    this.footRoscoe.visible = false;
+    scene.add(this.footRoscoe);
   }
 
   /** Returns the siren loudness (0–1) for the audio mix. */
@@ -194,11 +211,14 @@ export class TrafficView {
       if (!v) { v = buildVehicle(n.k, n.c); this.views.set(n.id, v); this.scene.add(v.g); v.g.position.set(n.x, 0, n.z); v.g.rotation.y = n.yaw; }
       const k = Math.min(1, dt * 12);
       const p = v.g.position;
-      if (Math.hypot(n.x - p.x, n.z - p.z) > 30) p.set(n.x, 0, n.z);
+      if (Math.hypot(n.x - p.x, n.z - p.z) > 30) p.set(n.x, p.y, n.z);
       else { p.x += (n.x - p.x) * k; p.z += (n.z - p.z) * k; }
       let dy = n.yaw - v.g.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       v.g.rotation.y += dy * k;
-      v.g.rotation.z = n.w > 0 ? 0.06 : 0; // wrecked cars sag
+      // wrecked cars sag; crashed ones barrel-roll (lifted so the roof, not the ground, takes it)
+      const roll = n.roll ?? 0;
+      v.g.rotation.z = roll || (n.w > 0 ? 0.06 : 0);
+      p.y = roll ? Math.abs(Math.sin(roll)) * NPC_DIMS[n.k][0] + (1 - Math.cos(roll)) * 0.75 : 0;
       v.heads.emissiveIntensity = daylight < 0.5 ? 2.2 : 0.2;
       // wheels roll; brake lights on when slowing; turn signals while changing lanes
       for (const wh of v.wheels) wh.rotation.x -= (n.speed * dt) / v.wheelR;
@@ -212,19 +232,24 @@ export class TrafficView {
       v.sigL.emissiveIntensity = dy > 0 ? Math.max(blink, hazard) : hazard;
       v.sigR.emissiveIntensity = dy < 0 ? Math.max(blink, hazard) : hazard;
       if (n.k === 'cop' && v.red && v.blue && v.flash) {
-        const on = s.cop.phase > 0 && s.cop.phase < 4;
+        const on = (s.cop.phase > 0 && s.cop.phase < 4) || s.cop.phase === 5;
         const phase = Math.floor(t * 4) % 2 === 0;
         v.red.emissiveIntensity = on && phase ? 3 : 0.1;
         v.blue.emissiveIntensity = on && !phase ? 3 : 0.1;
         v.flash.color.set(phase ? '#ff1a1a' : '#2962ff');
         v.flash.intensity = on ? 18 : 0;
-        if (on && s.cop.phase !== 3) siren = Math.max(siren, Math.max(0, 1 - camPos.distanceTo(p) / 250));
+        if (on && s.cop.phase < 3) siren = Math.max(siren, Math.max(0, 1 - camPos.distanceTo(p) / 250));
       }
     }
     for (const [id, v] of this.views) if (!seen.has(id)) { this.scene.remove(v.g); this.views.delete(id); }
 
     this.roscoe.visible = s.cop.phase === 3;
     if (this.roscoe.visible) this.roscoe.position.y = Math.abs(Math.sin(t * 2)) * 0.02;
+    // on foot with the taser
+    const ft = s.cop.phase === 5 ? s.cop.foot : null;
+    if (ft && !this.footRoscoe.visible) this.footRoscoe.position.set(ft.x, 0, ft.z);
+    this.footRoscoe.visible = !!ft;
+    if (ft) chaserPose(this.footRoscoe, this.scene, ft, [ft.x, ft.z], dt);
     return siren;
   }
 }

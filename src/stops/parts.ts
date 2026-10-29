@@ -3,9 +3,13 @@
 import * as THREE from 'three';
 import { itemName } from '../items/Items';
 import type { Box2 } from '../rv/RV';
-import type { ItemState } from '../types';
+import type { ChaseState, ItemState } from '../types';
 import { MAT, canvasTex, signTexture, type Component, type HostCtx } from './kit';
 import { makeNpc } from '../models/npcs';
+import { bonk, caught, stepChase } from './chase';
+import { chaserPose, makeBat } from './chaseView';
+import { Assets } from '../core/AssetLoader';
+import { dressBuilding, wallMaterial } from './buildingKit';
 
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 const rectBox = (r: Rect, top?: number): Box2 => ({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, top });
@@ -27,6 +31,9 @@ export interface BuildingOpts extends Rect {
   sign?: { lines: [string, number, string][]; bg: string; w: number; h: number };
   inner?: { x: number; door: [number, number] };
   light?: string;
+  /** Kit colors: cornice/frames, front-window awnings (omit = door awning only), cornice stripe. */
+  trim?: string; awning?: string; accent?: string;
+  windows?: boolean; pilasters?: number; portal?: boolean;
 }
 export function building(o: BuildingOpts): Component {
   const t = 0.2;
@@ -39,20 +46,32 @@ export function building(o: BuildingOpts): Component {
     id: o.id,
     colliders: () => walls,
     build(v) {
-      const wall = new THREE.MeshStandardMaterial({ color: o.wall, roughness: 0.9 });
-      for (const w of walls) v.box(wall, w.x0, w.x1, 0, o.h, w.z0, w.z1, true);
-      v.box(wall, o.x0 - t, o.x0, 2.6, o.h, o.door[0], o.door[1], true);
-      if (o.inner) v.box(wall, o.inner.x, o.inner.x + t, 2.4, o.h, o.inner.door[0], o.inner.door[1]);
-      v.box(new THREE.MeshStandardMaterial({ color: o.roof, roughness: 0.9 }), o.x0 - 0.6, o.x1 + 0.4, o.h, o.h + 0.25, o.z0 - 0.5, o.z1 + 0.5, true);
+      const kit = Assets.has('buildings');
+      const flat = new THREE.MeshStandardMaterial({ color: o.wall, roughness: 0.9 });
+      const wallMat = (w: Box2, h: number) => kit ? wallMaterial(o.wall, Math.max(w.x1 - w.x0, w.z1 - w.z0), h) : flat;
+      for (const w of walls) v.box(wallMat(w, o.h), w.x0, w.x1, 0, o.h, w.z0, w.z1, true);
+      v.box(flat, o.x0 - t, o.x0, 2.6, o.h, o.door[0], o.door[1], true);
+      if (o.inner) v.box(flat, o.inner.x, o.inner.x + t, 2.4, o.h, o.inner.door[0], o.inner.door[1]);
+      // ceiling seen from inside (the kit adds its own roof deck on top)
+      if (kit) v.box(new THREE.MeshStandardMaterial({ color: '#d8d2c4', roughness: 0.9 }), o.x0, o.x1, o.h - 0.02, o.h, o.z0, o.z1);
+      else v.box(new THREE.MeshStandardMaterial({ color: o.roof, roughness: 0.9 }), o.x0 - 0.6, o.x1 + 0.4, o.h, o.h + 0.25, o.z0 - 0.5, o.z1 + 0.5, true);
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(o.x1 - o.x0, o.z1 - o.z0).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: o.floor, roughness: 0.7 }));
       floor.position.set((o.x0 + o.x1) / 2, 0.012, (o.z0 + o.z1) / 2); floor.receiveShadow = true; v.group.add(floor);
+      if (kit) dressBuilding(v.group, { ...o }, t);
       // windows either side of the door
-      for (const [za, zb] of [[o.z0 + 1, o.door[0] - 1], [o.door[1] + 1, o.z1 - 1]]) {
+      else for (const [za, zb] of [[o.z0 + 1, o.door[0] - 1], [o.door[1] + 1, o.z1 - 1]]) {
         if (zb - za < 1.5) continue;
         const win = new THREE.Mesh(new THREE.PlaneGeometry(zb - za, 1.1), MAT.glassDark);
         win.position.set(o.x0 - t - 0.01, 1.75, (za + zb) / 2); win.rotation.y = -Math.PI / 2; v.group.add(win);
       }
-      if (o.sign) {
+      if (o.sign && kit) {
+        // a rooftop sign board on two steel legs, above the cornice
+        const s = v.sign(o.sign.lines, o.sign.bg, o.sign.w, o.sign.h);
+        const y = o.h + 0.55 + o.sign.h / 2 + (o.portal ? 2.3 : 0), zc = (o.door[0] + o.door[1]) / 2;
+        s.position.set(o.x0 + 0.15, y, zc); s.rotation.y = -Math.PI / 2;
+        for (const dz of [-o.sign.w * 0.35, o.sign.w * 0.35]) v.box(MAT.steel, o.x0 + 0.2, o.x0 + 0.32, o.h, y, zc + dz - 0.06, zc + dz + 0.06, true);
+        v.box(MAT.dark, o.x0 + 0.17, o.x0 + 0.22, y - o.sign.h / 2 - 0.05, y + o.sign.h / 2 + 0.05, zc - o.sign.w / 2 - 0.05, zc + o.sign.w / 2 + 0.05);
+      } else if (o.sign) {
         const s = v.sign(o.sign.lines, o.sign.bg, o.sign.w, o.sign.h);
         s.position.set(o.x0 - t - 0.03, o.h - 0.75, (o.door[0] + o.door[1]) / 2); s.rotation.y = -Math.PI / 2;
       }
@@ -130,11 +149,31 @@ export interface ShopOpts {
 }
 export function shop(o: ShopOpts): Component {
   const wasInside = new Map<number, boolean>();
-  let clerkView: THREE.Group, paper: THREE.Mesh;
+  let unseen: { who: number; at: number }[] = [];
+  let time = 0;
+  let clerkView: THREE.Group, paper: THREE.Mesh, bat: THREE.Mesh;
+  const NAME = o.clerkName.toUpperCase();
+  /** caught red-handed: heat + the clerk comes out swinging */
+  const busted = (h: HostCtx, st: any, who: number) => {
+    caught(h, who); h.sfx('yell');
+    if (st.chase) return;
+    const [x, , z] = h.world(o.clerk[0], 0, o.clerk[1]);
+    st.chase = { who, x, z, t: 0 };
+    h.toast(`🏏 ${NAME} COMES OVER THE COUNTER WITH A BAT! Run!`);
+  };
   return {
     id: o.id,
     colliders: () => [...o.shelves.map((s) => rectBox(s, s.top)), rectBox(o.checkout, o.checkout.top)],
-    init: () => ({ watch: true, t: 6 }),
+    init: () => ({ watch: true, t: 6, chase: null }),
+    unpaid(h, st, from) {
+      const p = h.handOf(from);
+      if (!p) return false;
+      const [lx, lz] = h.local(p[0], p[2]);
+      if (!inRect(o.store, lx, lz)) return false;
+      if (st.watch) { h.toast(`🚨 ${NAME}: "YOU GONNA PAY FOR THAT?!" (+1 heat)`); busted(h, st, from); }
+      else { h.toast('🤫 Ate the evidence.'); unseen.push({ who: from, at: time }); }
+      return true;
+    },
     spawn(h) {
       let slot = 0;
       for (const [k, price, count] of o.products) {
@@ -164,8 +203,22 @@ export function shop(o: ShopOpts): Component {
       }
     },
     step(h, st, dt) {
+      time += dt;
       st.t -= dt;
-      if (st.t <= 0) { st.watch = !st.watch; st.t = st.watch ? 7 + Math.random() * 6 : 3 + Math.random() * 4; }
+      if (st.t <= 0) {
+        st.watch = !st.watch; st.t = st.watch ? 9 + Math.random() * 6 : 2 + Math.random() * 2;
+        if (st.watch) {
+          const hit = unseen.filter((u) => time - u.at < 10).find(() => Math.random() < 0.5);
+          if (hit) { h.toast(`🚨 ${NAME}: "...hey. HEY! Where'd my stuff go?!"`); busted(h, st, hit.who); }
+          unseen = [];
+        }
+      }
+      if (st.chase) {
+        const [hx, , hz] = h.world(o.clerk[0], 0, o.clerk[1]);
+        const res = stepChase(h, st.chase, dt, 5.2, 1.3, [hx, hz]);
+        if (res === 'hit') { bonk(h, st.chase.who, 3); h.toast(`💥 ${NAME} BONKED ${h.name(st.chase.who).toUpperCase()} WITH A BAT. (stolen goods taken back)`); st.chase = null; }
+        else if (res === 'lost') { h.toast(`🏏 ${o.clerkName} gives up the chase, wheezing.`); st.chase = null; }
+      }
       for (const it of h.s.items) {
         if (it.p <= 0) continue;
         const w = h.itemWorld(it); if (!w) continue;
@@ -175,9 +228,9 @@ export function shop(o: ShopOpts): Component {
         const was = wasInside.get(it.id) ?? inside;
         wasInside.set(it.id, inside);
         if (was && !inside) {
-          const what = itemName(it.k, it.d); it.p = 0;
-          if (st.watch) { h.s.heat += 1; h.sfx('yell'); h.toast(`🚨 ${o.clerkName.toUpperCase()}: "HEY! THAT ${what.toUpperCase()} AIN'T FREE!" (+1 heat)`); }
-          else h.toast(`🤫 Five-finger discount: ${what}`);
+          const what = itemName(it.k, it.d); it.p = 0; it.st = 1;
+          if (st.watch && it.h >= 0) { h.toast(`🚨 ${NAME}: "HEY! THAT ${what.toUpperCase()} AIN'T FREE!" (+1 heat)`); busted(h, st, it.h); }
+          else { h.toast(`🤫 Five-finger discount: ${what}`); if (it.h >= 0) unseen.push({ who: it.h, at: time }); }
         }
       }
     },
@@ -192,14 +245,20 @@ export function shop(o: ShopOpts): Component {
       clerkView.position.set(o.clerk[0], 0, o.clerk[1]);
       paper = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.35), new THREE.MeshStandardMaterial({ color: '#eee', side: THREE.DoubleSide }));
       paper.position.set(0, 1.25, -0.42); paper.rotation.x = -0.4; clerkView.add(paper);
+      bat = makeBat(); bat.visible = false; clerkView.add(bat);
       v.group.add(clerkView);
-      v.reg('clerk', clerkView, (st) => (st.watch ? `${o.clerkName.toUpperCase()}: "Can I help ya?"` : `${o.clerkName} is reading a magazine…`));
+      v.reg('clerk', clerkView, (st) => (st.chase ? `${NAME} IS COMING WITH A BAT` : st.watch ? `${NAME}: "Can I help ya?"` : `${o.clerkName} is reading a magazine…`));
     },
-    update(_v, st, _s, dt) {
-      const target = st.watch ? Math.PI / 2 : -Math.PI / 2;
-      let d = target - clerkView.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
-      clerkView.rotation.y += d * Math.min(1, dt * 4);
-      paper.visible = !st.watch;
+    update(v, st, _s, dt) {
+      const ch = st.chase as ChaseState | null;
+      chaserPose(clerkView, v.group, ch, o.clerk, dt);
+      bat.visible = !!ch;
+      if (!ch) {
+        const target = st.watch ? Math.PI / 2 : -Math.PI / 2;
+        let d = target - clerkView.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
+        clerkView.rotation.y += d * Math.min(1, dt * 4);
+      }
+      paper.visible = !st.watch && !ch;
     },
   };
 }
@@ -312,7 +371,7 @@ export function pumpIntoRV(h: HostCtx, st: any, index: number, price: number, fr
 // ---------------------------------------------------------------- pawn / vending / ice / bed / scrap
 export const PAWN_VALUES: Record<string, number> = {
   spare: 45, extinguisher: 18, hammer: 9, tape: 5, jerrycan: 12, coolant: 7, fuse: 2, map: 1, sponge: 1,
-  nozzle: 0, scratch: 0, card: 0, ice: 0,
+  nozzle: 0, scratch: 0, card: 0, ice: 0, weed: 0, pistol: 0, rock: 0, rocket: 0, battery: 35, cat: 80, wheel: 25,
 };
 export function pawn(id: string, pos: [number, number, number], who: string): Component {
   return {

@@ -2,6 +2,7 @@
 import { CFG, ENGINE, NOS, gearInfo } from '../config';
 import { SPEED_LIMIT } from '../world/World';
 import { progressMiles, totalMiles } from '../world/Route';
+import { itemName } from '../items/Items';
 import type { SharedState, SeatRole } from '../types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -14,10 +15,10 @@ function hhmm(sec: number) {
 export class HUD {
   private el = {
     hud: $('hud'), wedding: $('h-wedding'), time: $('h-time'), miles: $('h-miles'), money: $('h-money'), moneyV: $('h-money-v'), moneyFly: $('h-money-fly'), badges: $('h-badges'),
-    phone: $('phone'), radioCap: $('radio-cap'), hurt: $('fx-hurt'), speedFx: $('fx-speed'), nosFx: $('fx-nos'), flash: $('fx-flash'), camWarn: $('cam-warn'), nos: $('g-nos'),
+    phone: $('phone'), radioCap: $('radio-cap'), hurt: $('fx-hurt'), speedFx: $('fx-speed'), nosFx: $('fx-nos'), flash: $('fx-flash'), black: $('fx-black'), camWarn: $('cam-warn'), nos: $('g-nos'),
     reticle: $('reticle'), prompt: $('prompt'), hints: $('hints'), toasts: $('toasts'), tab: $('tab'), end: $('end'),
     pause: $('pause'), room: $('p-room'), dev: $('dev'),
-    hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), held: $('v-held'),
+    hp: $('v-hp'), puke: $('fx-puke'), hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), held: $('v-held'),
     gearbox: $('gearbox'), gear: $('g-gear'), gspeed: $('g-speed'), grpm: $('g-rpm'),
     smoke: $('fx-smoke'), hangry: $('fx-hangry'), lidTop: $('fx-lid-top'), lidBot: $('fx-lid-bot'),
   };
@@ -28,12 +29,20 @@ export class HUD {
   private flyEl: HTMLElement | null = null;
   private hurtA = 0;
   private flashA = 0;
+  private blackT = 0;
   private nosA = 0;
   private capT = 0;
   /** The groom's latest texts (shown on Tab). */
   readonly texts: string[] = [];
 
   show() { this.el.hud.classList.remove('hidden'); }
+
+  /** Fade to black for `sec` seconds (then ease back in). */
+  blackout(sec: number) { this.blackT = sec; }
+
+  /** Green "I ate something bad" wash. */
+  puke() { this.pukeA = 1; }
+  private pukeA = 0;
 
   /** White speed-camera flash. */
   flash() { this.flashA = 1; }
@@ -66,7 +75,11 @@ export class HUD {
 
   /** Per-frame effects that don't depend on state (dt in seconds). */
   fx(dt: number, speedMph: number, inRV: boolean, nos = false) {
+    this.blackT = Math.max(0, this.blackT - dt);
+    this.el.black.style.opacity = this.blackT > 1.2 ? '1' : (this.blackT / 1.2).toFixed(3);
     this.flashA = Math.max(0, this.flashA - dt * 2.2);
+    this.pukeA = Math.max(0, this.pukeA - dt * 0.35);
+    this.el.puke.style.opacity = this.pukeA.toFixed(3);
     this.el.flash.style.opacity = (this.flashA * 0.85).toFixed(3);
     this.nosA += ((nos && inRV ? 1 : 0) - this.nosA) * Math.min(1, dt * 5);
     this.el.nosFx.style.opacity = this.nosA.toFixed(3);
@@ -114,7 +127,7 @@ export class HUD {
     const remaining = Math.max(0, CFG.RUN_HOURS * 3600 - s.clock);
     const tod = CFG.START_HOUR * 3600 + s.clock;
     const day = Math.floor(tod / 86400) + 1;
-    this.el.wedding.textContent = `💒 Wedding in ${hhmm(remaining)}`;
+    this.el.wedding.textContent = s.mafia.on ? '💀 MAFIA ON YOUR TAIL' : `🌿 Deliver the stash in ${hhmm(remaining)}`;
     this.el.wedding.classList.toggle('urgent', remaining < 3 * 3600);
     this.el.time.textContent = `🕗 ${hhmm(tod % 86400)} · Day ${day}`;
     this.el.miles.textContent = `🛣️ Mile ${progressMiles(s.rv.z).toFixed(1)} / ${totalMiles()}`;
@@ -164,13 +177,17 @@ export class HUD {
     // vitals & screen effects
     const me = s.crew[opts.myId];
     const hunger = me?.hunger ?? 100, hypno = me?.hypno ?? 0;
+    const hp = me?.hp ?? 100;
+    this.el.hp.style.width = `${hp}%`;
+    this.el.hp.classList.toggle('low', hp < 25);
     this.el.hunger.style.width = `${hunger}%`;
     this.el.hunger.classList.toggle('low', hunger < 25);
     this.el.stam.style.width = `${opts.stamina}%`;
     const driving = opts.seat === 'driver';
     this.el.awakeRow.classList.toggle('hidden', !driving && hypno < 0.05);
     this.el.awake.style.width = `${(1 - hypno) * 100}%`;
-    this.el.held.textContent = opts.held ? `✋ ${opts.held}` : '';
+    const sl = me?.slot ?? 0;
+    this.el.held.textContent = [0, 1, 2].map((n) => { const it = s.items.find((i) => i.h === opts.myId && i.sl === n); return `${n === sl ? '▶' : ' '}${n + 1}:${it ? itemName(it.k, it.d) : '—'}`; }).join('   ');
     this.el.smoke.style.opacity = String(opts.inRV ? s.cab.smoke * 0.75 : 0);
     const t = performance.now() / 1000;
     this.el.hangry.style.opacity = hunger < 25 ? String(0.35 + 0.35 * Math.sin(t * 4)) : '0';

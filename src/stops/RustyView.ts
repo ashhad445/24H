@@ -3,9 +3,12 @@ import * as THREE from 'three';
 import { makeNpc } from '../models/npcs';
 import type { PromptCtx } from '../rv/RV';
 import type { SharedState } from '../types';
+import { chaserPose, makeBat } from './chaseView';
+import { Assets } from '../core/AssetLoader';
+import { dressBuilding, kitProp } from './buildingKit';
 import {
   BUCKET, CANOPY, CLETUS, COUNTER, CRABS, CRAB_COLORS, CRATE, DERBY, HOLSTER, LOT, PRICES, PUMPS, REGISTER, RUSTY_FRAME,
-  SEDAN, SIGN, SLOT, SPLATS, STORE, SUV, SUV_CAP, TABLES, WASH,
+  SEDAN, SIGN, SLOT, SPLATS, STORE, SUV, SUV_CAP, TABLES, WASH, AMMO_BOX, DEALER, DEALER_CRATE, JUNKERS, PART_SELL, TAMMY,
 } from './rusty';
 
 type Prompt = (s: SharedState, c: PromptCtx) => string;
@@ -24,6 +27,8 @@ function signTex(lines: [string, number, string][], bg: string, w = 512, h = 256
     let y = 0; const total = lines.reduce((a, l) => a + l[1] * 1.15, 0); y = (h - total) / 2;
     for (const [text, size, color] of lines) {
       g.font = `900 ${size}px "Arial Black", Arial, sans-serif`; g.fillStyle = color;
+      const fit = Math.min(1, (w * 0.92) / Math.max(1, g.measureText(text).width));
+      if (fit < 1) g.font = `900 ${Math.floor(size * fit)}px "Arial Black", Arial, sans-serif`;
       g.fillText(text, w / 2, y + size * 0.6); y += size * 1.15;
     }
   });
@@ -31,12 +36,21 @@ function signTex(lines: [string, number, string][], bg: string, w = 512, h = 256
 
 const SYMBOLS = ['7', '🍒', 'BAR', '🔔', '🍋', '★'];
 
+const carPrompt = (i: number) => (s: SharedState, c: { held: string }) => {
+  const car = s.rusty.cars[i];
+  if (!car) return '';
+  if (c.held === 'jerrycan') return car.gas > 0 ? 'Siphon gas (minigame — mess up and you get caught)' : 'Bone dry';
+  if (c.held) return 'Empty hands to strip it, or a jerrycan to siphon';
+  return car.parts > 0 ? `Strip the ${['battery', 'catalytic converter', 'wheel'][3 - car.parts]} (sell it to Vinnie out back)` : 'A stripped shell';
+};
+
 export class RustyView {
   readonly group = new THREE.Group();
   private prompts = new Map<string, Prompt>();
   private pumpDisplays: { tex: THREE.CanvasTexture; ctx: CanvasRenderingContext2D; last: string }[] = [];
   private hoses: THREE.Mesh[] = [];
   private cletus = new THREE.Group();
+  private bat!: THREE.Mesh;
   private paper: THREE.Mesh;
   private reels: THREE.Mesh[] = [];
   private reelAngle = [0, 0, 0];
@@ -117,16 +131,27 @@ export class RustyView {
     for (const [x0, x1, z0, z1] of shellWalls) this.box(M.wall, x0, x1, 0, S.h, z0, z1, true);
     this.box(M.wall, S.x0 - wt, S.x0, 2.6, S.h, S.doorZ0, S.doorZ1, true); // over the door
     this.box(M.wall, S.innerX, S.innerX + wt, 2.4, S.h, S.innerDoorZ0, S.innerDoorZ1);
-    this.box(M.roof, S.x0 - 0.6, S.x1 + 0.4, S.h, S.h + 0.25, S.z0 - 0.5, S.z1 + 0.5, true);
-    this.box(M.trim, S.x0 - 0.25, S.x0 - 0.2, 0, 0.6, S.z0, S.z1); // wainscot
+    const roofSlab = this.box(M.roof, S.x0 - 0.6, S.x1 + 0.4, S.h, S.h + 0.25, S.z0 - 0.5, S.z1 + 0.5, true);
+    const wainscot = this.box(M.trim, S.x0 - 0.25, S.x0 - 0.2, 0, 0.6, S.z0, S.z1); // wainscot
     // front windows (glass in a frame) either side of the door
-    for (const [z0, z1] of [[-10, -5], [1.5, 6]]) this.glassPane(S.x0 - wt - 0.01, 1.2, 2.3, z0, z1);
+    const panes = [[-10, -5], [1.5, 6]].map(([z0, z1]) => this.glassPane(S.x0 - wt - 0.01, 1.2, 2.3, z0, z1));
     const floorTex = canvasTex(128, 128, (c) => { for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { c.fillStyle = (i + j) % 2 ? '#d9d2c3' : '#6d4c41'; c.fillRect(i * 16, j * 16, 16, 16); } });
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(8, 10);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(S.x1 - S.x0, S.z1 - S.z0).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 }));
     floor.position.set((S.x0 + S.x1) / 2, 0.012, (S.z0 + S.z1) / 2); floor.receiveShadow = true; g.add(floor);
     const storeSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.1), new THREE.MeshBasicMaterial({ map: signTex([['GENERAL STORE', 70, '#3b1f0e'], ['ICE · BAIT · BEER · PARTS', 34, '#7a2a1a']], '#f0ad4e') }));
     storeSign.position.set(S.x0 - wt - 0.02, 3.2, -2); storeSign.rotation.y = -Math.PI / 2; g.add(storeSign);
+    // Blender kit dressing once the models are in: cornice, framed windows, awnings, roof clutter, yard junk
+    Assets.onReady(() => {
+      if (!dressBuilding(g, { x0: S.x0, x1: S.x1, z0: S.z0, z1: S.z1, h: S.h, door: [S.doorZ0, S.doorZ1], wall: '#e9c48a', roof: '#7d4b2a', trim: '#fff3e0', awning: '#b71c1c', accent: '#b71c1c' }, wt)) return;
+      roofSlab.visible = wainscot.visible = false; panes.forEach((p) => (p.visible = false));
+      this.box(new THREE.MeshStandardMaterial({ color: '#d8d2c4', roughness: 0.9 }), S.x0, S.x1, S.h - 0.02, S.h, S.z0, S.z1);
+      // the sign moves up onto the roof on two legs
+      storeSign.position.set(S.x0 + 0.15, S.h + 1.2, -2);
+      for (const dz of [-2.1, 2.1]) this.box(M.dark, S.x0 + 0.2, S.x0 + 0.32, S.h, S.h + 1.2, -2 + dz - 0.06, -2 + dz + 0.06, true);
+      for (const [n, x, z, r] of [['dumpster', 52.5, -8, Math.PI / 2], ['trashcan', 32.8, -4.3, 0], ['newsbox', 32.8, 0.6, Math.PI / 2], ['bench', 32.6, -8, Math.PI / 2],
+        ['barrel', 31.5, 10.5, 0], ['barrel', 32.2, 11, 0], ['tires', 47.5, 12, 0], ['crate', 52.6, 4, 0.3]] as [string, number, number, number][]) kitProp(g, n, x, z, r);
+    });
     for (const lp of [[40, -3], [48, 0]]) { const l = new THREE.PointLight('#ffe2a8', 5, 14, 1); l.position.set(lp[0], 3.5, lp[1]); g.add(l); }
     // counter + register
     this.box(M.wood, COUNTER.x0, COUNTER.x1, 0, COUNTER.top, COUNTER.z0, COUNTER.z1, true);
@@ -199,6 +224,7 @@ export class RustyView {
     washSign.position.set(WASH.x0 - 0.01, WASH.h - 0.2, (WASH.z0 + WASH.z1) / 2); washSign.rotation.y = -Math.PI / 2; g.add(washSign);
     this.buildCar(this.sedan, '#4fc3f7', SEDAN.len, SEDAN.wid, 1.0, 0.5, false);
     this.sedan.position.set(SEDAN.x, 0, SEDAN.z); g.add(this.sedan);
+    this.reg('rusty:car0', this.sedan, carPrompt(0)); // registered before the mud so the splats keep their own id
     const mud = canvasTex(128, 128, (c) => {
       for (let i = 0; i < 26; i++) {
         const x = 64 + (Math.random() - 0.5) * 70, y = 64 + (Math.random() - 0.5) * 70, r = 8 + Math.random() * 22;
@@ -227,7 +253,28 @@ export class RustyView {
     suv.rotation.y = Math.PI / 2; suv.position.set(SUV.x, 0, SUV.z); g.add(suv);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.04, 12).rotateZ(Math.PI / 2), M.dark);
     cap.position.set(...SUV_CAP); g.add(cap);
-    this.reg('rusty:suv', cap, (_s, c) => (c.held === 'jerrycan' ? 'Hold to siphon gas (25% chance the owner sees)' : "Somebody's SUV. Full tank, probably."));
+    this.reg('rusty:car1', suv, carPrompt(1));
+    JUNKERS.forEach((j, n) => {
+      const car = new THREE.Group();
+      this.buildCar(car, j.color, 4.4, 1.9, 1.0, 0.5, n === 1);
+      car.rotation.y = Math.PI / 2 + (n - 1) * 0.08; car.position.set(j.x, 0, j.z); g.add(car);
+      this.reg(`rusty:car${n + 2}`, car, carPrompt(n + 2));
+    });
+
+    // ---------- the shady corner behind the store ----------
+    this.box(this.M.wood, DEALER_CRATE.x0, DEALER_CRATE.x1, 0, DEALER_CRATE.top, DEALER_CRATE.z0, DEALER_CRATE.z1, true);
+    const vinnie = makeNpc('generic', { body: '#2d2f33', pants: '#17181a', shades: true, hat: 'cap', hatColor: '#111', pose: 'cross', skin: '#b98152' });
+    vinnie.position.set(...DEALER); vinnie.rotation.y = Math.PI / 2; g.add(vinnie);
+    const gunBox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.26), new THREE.MeshStandardMaterial({ color: '#4e5d3a', roughness: 0.8 }));
+    gunBox.position.set(...AMMO_BOX); g.add(gunBox);
+    this.reg('rusty:ammo', gunBox, (_s, c) => (c.held === 'card' ? `Buy 12 rounds for your pistol — $${PRICES.ammo}` : 'Box of ammo (bring the card; carry a pistol)'));
+    this.reg('rusty:dealer', vinnie, (_s, c) => (PART_SELL[c.held] ? `Sell the ${c.held === 'cat' ? 'catalytic converter' : c.held} to Vinnie — $${PART_SELL[c.held]}` : c.held === 'card' ? `Buy a pistol — $${PRICES.pistol} (no receipt)` : 'VINNIE: "Psst. Bring the card. Or bring parts."'));
+    const tammy = makeNpc('generic', { body: '#e91e63', pants: '#880e4f', hat: 'beehive', hatColor: '#ffeb3b', skin: '#e8b98a', pose: 'hips' });
+    tammy.position.set(...TAMMY); tammy.rotation.y = Math.PI / 2; g.add(tammy);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff1744' }));
+    lamp.position.set(TAMMY[0] + 0.6, 2.4, TAMMY[2]); g.add(lamp);
+    this.reg('rusty:tammy', tammy, () => `TAMMY: "$${PRICES.favor}, sugar. Round the back. Costs you your appetite and legs."`);
+    this.reg('rusty:suv', cap, (_s, c) => (c.held === 'jerrycan' ? 'Siphon gas (minigame — mess up and you get caught)' : "Somebody's SUV. Full tank, probably."));
 
     // ---------- pylon sign ----------
     this.box(M.steel, SIGN[0] - 0.2, SIGN[0] + 0.2, 0, 9, SIGN[1] - 0.2, SIGN[1] + 0.2, true);
@@ -250,6 +297,7 @@ export class RustyView {
     const w = new THREE.Mesh(new THREE.PlaneGeometry(z1 - z0, y1 - y0), new THREE.MeshStandardMaterial({ color: '#33414a', roughness: 0.15, metalness: 0.5 }));
     w.position.set(x, (y0 + y1) / 2, (z0 + z1) / 2); w.rotation.y = -Math.PI / 2;
     this.group.add(w);
+    return w;
   }
 
   private reg(id: string, obj: THREE.Object3D, prompt: Prompt) {
@@ -266,8 +314,9 @@ export class RustyView {
     const gun = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.0, 0.06), this.M.wood);
     gun.position.set(COUNTER.x1 + 0.12, 0.5, COUNTER.z1 - 0.2); gun.rotation.z = 0.25; this.group.add(gun);
     c.position.set(...CLETUS);
+    this.bat = makeBat(); this.bat.visible = false; c.add(this.bat);
     c.traverse((o) => { o.userData.iid = 'rusty:cletus'; });
-    this.prompts.set('rusty:cletus', (s) => (s.rusty.cletus.watch ? 'CLETUS: "I got my eye on you."' : 'Cletus is reading the paper…'));
+    this.prompts.set('rusty:cletus', (s) => (s.rusty.cletus.chase ? 'CLETUS IS COMING WITH A BAT' : s.rusty.cletus.watch ? 'CLETUS: "I got my eye on you."' : 'Cletus is reading the paper…'));
     this.group.add(c);
   }
 
@@ -334,11 +383,16 @@ export class RustyView {
       hose.geometry = new THREE.TubeGeometry(curve, 16, 0.025, 6, false);
     });
 
-    // Cletus turns between the floor (door) and his newspaper
-    const targetYaw = r.cletus.watch ? Math.PI / 2 : -Math.PI / 2;
-    let dy = targetYaw - this.cletus.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    this.cletus.rotation.y += dy * Math.min(1, dt * 4);
-    this.paper.visible = !r.cletus.watch;
+    // Cletus turns between the floor (door) and his newspaper — or comes after you with a bat
+    const ch = r.cletus.chase;
+    chaserPose(this.cletus, this.group, ch, CLETUS, dt);
+    this.bat.visible = !!ch;
+    if (!ch) {
+      const targetYaw = r.cletus.watch ? Math.PI / 2 : -Math.PI / 2;
+      let dy = targetYaw - this.cletus.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.cletus.rotation.y += dy * Math.min(1, dt * 4);
+    }
+    this.paper.visible = !r.cletus.watch && !ch;
 
     // slot reels (stop one by one)
     const left = r.slot.left;

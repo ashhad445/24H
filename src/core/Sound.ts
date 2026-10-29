@@ -49,6 +49,7 @@ export class Sound {
   /** Radio speech captions (HUD). */
   onCaption: (who: string, text: string) => void = () => {};
   private voice: SpeechSynthesisVoice | null = null;
+  private voices: { dale: SpeechSynthesisVoice | null; mort: SpeechSynthesisVoice | null; pip: SpeechSynthesisVoice | null } = { dale: null, mort: null, pip: null };
 
   /** Must be called from a user gesture. */
   init() {
@@ -214,7 +215,13 @@ export class Sound {
     try {
       const choose = () => {
         const vs = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
-        this.voice = vs.find((v) => /david|guy|daniel|male|fred|alex/i.test(v.name)) ?? vs[0] ?? null;
+        // neural / "natural" voices (Edge, Chrome online) sound far more human than the default ones
+        const score = (v: SpeechSynthesisVoice) => (/natural|neural|online/i.test(v.name) ? 3 : 0) + (/google|premium|enhanced/i.test(v.name) ? 2 : 0) + (/en-US|en-GB/.test(v.lang) ? 1 : 0);
+        const best = [...vs].sort((a, b) => score(b) - score(a));
+        const male = best.filter((v) => /david|guy|daniel|mark|george|ryan|james|male|fred|alex|eric|davis|brian|roger/i.test(v.name));
+        const female = best.filter((v) => /aria|jenny|zira|hazel|susan|samantha|sonia|libby|michelle|ana|emma|female|karen|victoria/i.test(v.name));
+        this.voices = { dale: male[0] ?? best[0] ?? null, mort: male[1] ?? male[0] ?? best[0] ?? null, pip: female[0] ?? best[1] ?? best[0] ?? null };
+        this.voice = best[0] ?? null;
       };
       choose();
       speechSynthesis.addEventListener('voiceschanged', choose);
@@ -229,9 +236,10 @@ export class Sound {
       const u = new SpeechSynthesisUtterance(text);
       u.volume = Math.min(1, this.vol.master ** 2 * this.vol.radio ** 2 * level * 1.2);
       if (u.volume < 0.02) return;
-      u.rate = who === 'Pip' ? 1.18 : 1.05;
-      u.pitch = who === 'Desert Dale' ? 0.75 : who === 'Mortimer Graves' ? 0.55 : who === 'Pip' ? 1.45 : 1.0;
-      if (this.voice) u.voice = this.voice;
+      u.rate = who === 'Pip' ? 1.06 : who === 'Mortimer Graves' ? 0.93 : 1.0;
+      u.pitch = who === 'Desert Dale' ? 0.9 : who === 'Mortimer Graves' ? 0.8 : who === 'Pip' ? 1.12 : 1.0;
+      const v = who === 'Pip' ? this.voices.pip : who === 'Mortimer Graves' ? this.voices.mort : who === 'Desert Dale' ? this.voices.dale : this.voice;
+      if (v ?? this.voice) u.voice = (v ?? this.voice)!;
       speechSynthesis.speak(u);
     } catch { /* no speech synthesis */ }
   }
@@ -294,6 +302,18 @@ export class Sound {
       case 'sizzle': this.noiseBurst(0.5, 4000, 0.3, 0, 'highpass'); break;
       case 'honk': this.tone(420, 420, 0.35, 'square', 0.08); this.tone(520, 520, 0.35, 'square', 0.08); break;
       case 'nos': this.tone(160, 1100, 1.6, 'sawtooth', 0.28); this.noiseBurst(4.6, 2600, 0.5, 0, 'highpass'); this.noiseBurst(0.4, 300, 0.9, 0, 'lowpass'); break;
+      case 'shot': this.noiseBurst(0.12, 1800, 0.9); this.noiseBurst(0.35, 400, 0.6, 0.02, 'lowpass'); this.tone(140, 40, 0.18, 'sine', 0.7); break;
+      case 'bonk': this.tone(220, 60, 0.25, 'sine', 0.8); this.noiseBurst(0.12, 700, 0.7); for (let i = 0; i < 4; i++) this.tone(2400 - i * 200, 2600 - i * 200, 0.12, 'sine', 0.06, 0.3 + i * 0.15); break;
+      case 'puke': this.tone(160, 90, 0.5, 'sawtooth', 0.25); this.noiseBurst(0.6, 600, 0.45, 0.1); this.noiseBurst(0.3, 400, 0.3, 0.8); break;
+      case 'rumble': this.noiseBurst(1.8, 120, 0.9); this.tone(55, 35, 1.6, 'sawtooth', 0.25); for (let i = 0; i < 5; i++) this.noiseBurst(0.1, 900, 0.3, 0.3 + i * 0.25); break;
+      case 'snore': this.tone(90, 70, 0.9, 'sawtooth', 0.12); this.noiseBurst(0.7, 300, 0.15, 0.1); this.tone(300, 500, 0.25, 'sine', 0.05, 1.2); break;
+      case 'clack': for (let i = 0; i < 18; i++) this.tone(1800, 1600, 0.02, 'square', 0.08, i * (0.08 + i * 0.012)); break;
+      case 'ding': this.tone(2093, 2093, 0.6, 'sine', 0.25); break;
+      case 'giggle': for (let i = 0; i < 6; i++) this.tone(500 + (i % 2) * 120, 450, 0.09, 'sine', 0.18, i * 0.12); break;
+      case 'coin': this.tone(1500, 1500, 0.05, 'square', 0.1); this.tone(2000, 2000, 0.12, 'square', 0.1, 0.05); break;
+      case 'claw': this.tone(300, 320, 0.8, 'sawtooth', 0.05); this.tone(900, 700, 0.1, 'square', 0.08, 0.8); break;
+      case 'alarm': for (let i = 0; i < 8; i++) this.tone(i % 2 ? 700 : 1100, i % 2 ? 1100 : 700, 0.3, 'square', 0.12, i * 0.3); break;
+      case 'kiss': for (const t of [0.3, 0.9, 1.6, 2.1, 3.0]) { this.tone(900, 380, 0.07, 'sine', 0.3, t); this.noiseBurst(0.05, 3200, 0.12, t + 0.03, 'highpass'); } break;
       case 'camera': this.noiseBurst(0.05, 5000, 0.4); this.tone(2000, 2000, 0.08, 'sine', 0.15, 0.06); break;
       case 'bullhorn': this.tone(180, 220, 0.25, 'sawtooth', 0.25); this.tone(220, 160, 0.4, 'sawtooth', 0.25, 0.28); break;
       case 'jukebox': {

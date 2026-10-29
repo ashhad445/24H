@@ -5,8 +5,9 @@ import type { ItemState, RustyState, SharedState } from '../types';
 import { fromSetLocal, toSetLocal } from './geom';
 import {
   COUNTER, CRABS, CRATE, HOLSTER, HOSE_LEN, PRICES, PRODUCTS, PUMPS, RUSTY_FRAME, RUSTY_SET, SCRATCH_COUNT, SCRATCH_PRICE,
-  SPLATS, TABLES, inStore, onCounter,
+  SPLATS, TABLES, inStore, onCounter, CAR_COUNT, PART_ORDER, PART_SELL, CLETUS,
 } from './rusty';
+import { bonk, caught, stepChase } from './chase';
 
 /** What the stop needs from the host. */
 export interface StopHost {
@@ -20,6 +21,8 @@ export interface StopHost {
   itemWorld(it: ItemState): [number, number, number] | null;
   charge(from: number, amount: number, what: string): boolean;
   credit(from: number, amount: number, what: string): void;
+  fade(to: number, dur: number, ko?: boolean): void;
+  handOf(id: number): [number, number, number] | null;
 }
 
 export function newRustyState(): RustyState {
@@ -28,7 +31,9 @@ export function newRustyState(): RustyState {
     slot: { res: [0, 0, 0], left: 0, spins: 0 },
     derby: { phase: 0, t: 0, pos: [0, 0, 0], bets: [], winner: -1 },
     wash: { dirt: SPLATS.map(() => 2), away: 0 },
-    cletus: { watch: true, t: 8 },
+    cletus: { watch: true, t: 8, chase: null },
+    // the wash sedan + SUV are full; the junkers were picked over long ago
+    cars: Array.from({ length: CAR_COUNT }, (_, i) => (i < 2 ? { parts: 3, gas: 3 } : { parts: 2, gas: 1 })),
   };
 }
 
@@ -37,9 +42,12 @@ const SYMBOLS = 6; // 0 = 7, 1 cherry, 2 bar, 3 bell, 4 lemon, 5 star
 export class RustySim {
   private spawned = false;
   private wasInside = new Map<number, boolean>();
-  private siphonT = new Map<number, number>();
+  private time = 0;
+  private heistAt = new Map<number, number>(); // per-player cooldown on minigame results
+  private unseen: { who: number; at: number }[] = []; // thefts Cletus might still notice when he looks up
   private crabSpeed = [0, 0, 0];
   private slotPlayer = -1;
+  private favorAt = new Map<number, number>();
 
   /** Sounds come from the middle of the lot. */
   private sfx(name: string) { const [x, z] = fromSetLocal(RUSTY_SET, 32, 0); this.h.sfx(name, [x, 1.5, z]); }
@@ -97,6 +105,43 @@ export class RustySim {
     const held = this.h.held(from);
     const r = this.r;
 
+    const car = /^car(\d+)(?::(ok|fail))?$/.exec(key);
+    if (car) return this.carAct(from, Number(car[1]), held, car[2] as 'ok' | 'fail' | undefined);
+    if (key === 'suv') return true; // the SUV's fuel cap: the client runs the siphon minigame on car1
+    if (key === 'dealer') {
+      if (held && PART_SELL[held.k]) {
+        const v = PART_SELL[held.k];
+        this.h.credit(from, v, `Fenced a ${itemName(held.k, 0)}`); this.h.items.remove(held.id); this.sfx('cash');
+        this.h.toast(`💵 VINNIE: "No questions asked." (+$${v})`);
+        return true;
+      }
+      if (!this.needCard(from)) return true;
+      if (this.h.s.items.filter((i) => i.h === from).length >= 3) { this.h.toast('Pockets full'); return true; }
+      if (!this.h.charge(from, PRICES.pistol, 'Pistol (no receipt)')) return true;
+      const gun = this.h.items.spawn('pistol', false, 0, 0, 0); gun.h = from; this.sfx('clank');
+      this.h.toast('🔫 VINNIE: "Never seen you. Aim for the engine, pal." — pistol bought (12 rounds, LMB to fire)');
+      return true;
+    }
+    if (key === 'ammo') {
+      if (!this.needCard(from)) return true;
+      const gun = this.h.s.items.find((i) => i.h === from && i.k === 'pistol');
+      if (!gun) { this.h.toast('You need a pistol on you to load'); return true; }
+      if (!this.h.charge(from, PRICES.ammo, 'Ammo box')) return true;
+      gun.d += 12; this.sfx('clank'); this.h.toast(`🔫 +12 rounds (${gun.d} loaded)`);
+      return true;
+    }
+    if (key === 'tammy') {
+      const now = this.h.s.clock, last = this.favorAt.get(from) ?? -1e9;
+      if (now - last < 1200) { this.h.toast('💋 TAMMY: "Honey, give your knees a rest. Come back later."'); return true; }
+      this.favorAt.set(from, now);
+      const me = this.h.s.crew[from];
+      if (me) { me.hunger = Math.min(me.hunger, 25); me.caf = 0; }
+      this.h.credit(from, PRICES.favor, 'Services rendered');
+      this.h.fade(from, 6);
+      this.h.toast(`🌹 ${this.h.name(from)} followed Tammy behind the dumpster… (+$${PRICES.favor}, and they come back drained)`);
+      return true;
+    }
+
     if (key.startsWith('pump')) {
       const i = Number(key.slice(4));
       const pump = r.pumps[i];
@@ -149,21 +194,6 @@ export class RustySim {
       case 'bucket':
         if (held?.k === 'sponge') { held.d = 5; this.sfx('pour'); this.h.toast('🧽 Sponge is sudsy (5 scrubs)'); }
         return true;
-      case 'suv': {
-        if (held?.k !== 'jerrycan') return true;
-        if (held.d >= 5) { this.h.toast('Jerrycan is full'); return true; }
-        const t = (this.siphonT.get(from) ?? 0) + 0.2;
-        this.siphonT.set(from, t);
-        if (t >= 3) {
-          this.siphonT.set(from, 0);
-          held.d = Math.min(5, held.d + 2);
-          if (Math.random() < 0.25) {
-            this.h.s.heat += 1; this.sfx('yell');
-            this.h.toast('🚨 "HEY! THAT\'S MY TRUCK!" — someone saw you. (+1 heat)');
-          } else { this.sfx('pour'); this.h.toast('⛽ Siphoned 2 gal. Tastes like crime.'); }
-        }
-        return true;
-      }
     }
 
     if (key.startsWith('crab')) {
@@ -200,12 +230,21 @@ export class RustySim {
 
     for (const p of r.pumps) p.auth = Math.max(0, p.auth - dt);
 
-    // Cletus alternates between watching the floor and reading his paper
+    // Cletus alternates between watching the floor and (briefly) reading his paper
+    this.time += dt;
     r.cletus.t -= dt;
     if (r.cletus.t <= 0) {
       r.cletus.watch = !r.cletus.watch;
-      r.cletus.t = r.cletus.watch ? 7 + Math.random() * 6 : 3 + Math.random() * 4;
+      r.cletus.t = r.cletus.watch ? 9 + Math.random() * 6 : 2 + Math.random() * 2;
+      // looking up from the paper, he may notice what just walked out the door
+      if (r.cletus.watch) {
+        const fresh = this.unseen.filter((u) => this.time - u.at < 10);
+        const hit = fresh.find(() => Math.random() < 0.5);
+        if (hit) { this.h.toast('🚨 CLETUS: "...WAIT A MINUTE. Where\'s my stuff?!"'); this.busted(hit.who); }
+        this.unseen = [];
+      }
     }
+    this.stepCletus(dt);
 
     for (const it of s.items) {
       // hose tether: nozzles snap back to the pump
@@ -228,11 +267,14 @@ export class RustySim {
         this.wasInside.set(it.id, inside);
         if (was && !inside) {
           const what = itemName(it.k, it.d);
-          it.p = 0;
-          if (r.cletus.watch) {
-            s.heat += 1; this.sfx('yell');
+          it.p = 0; it.st = 1;
+          if (r.cletus.watch && it.h >= 0) {
             this.h.toast(`🚨 CLETUS: "HEY! GET BACK HERE WITH THAT ${what.toUpperCase()}!" (+1 heat)`);
-          } else this.h.toast(`🤫 Five-finger discount: ${what}`);
+            this.busted(it.h);
+          } else {
+            this.h.toast(`🤫 Five-finger discount: ${what}`);
+            if (it.h >= 0) this.unseen.push({ who: it.h, at: this.time });
+          }
         }
       }
     }
@@ -282,8 +324,79 @@ export class RustySim {
     // car wash: a new dirty car arrives
     if (r.wash.away > 0) {
       r.wash.away -= dt;
-      if (r.wash.away <= 0) { r.wash.away = 0; r.wash.dirt = SPLATS.map(() => 2); }
+      if (r.wash.away <= 0) { r.wash.away = 0; r.wash.dirt = SPLATS.map(() => 2); r.cars[0] = { parts: 3, gas: 1 }; }
     }
+  }
+
+  /** Caught red-handed: +1 heat, Roscoe wants them, and Cletus grabs his bat. */
+  private busted(who: number) {
+    caught(this.h, who);
+    this.sfx('yell');
+    const c = this.r.cletus;
+    if (c.chase) return;
+    const [x, , z] = this.world(CLETUS[0], 0, CLETUS[2]);
+    c.chase = { who, x, z, t: 0 };
+    this.h.toast(`🏏 CLETUS GRABS HIS BAT AND COMES FOR ${this.h.name(who).toUpperCase()}! Run for the RV and drive!`);
+  }
+
+  private stepCletus(dt: number) {
+    const ch = this.r.cletus.chase;
+    if (!ch) return;
+    const [hx, , hz] = this.world(CLETUS[0], 0, CLETUS[2]);
+    const res = stepChase(this.h, ch, dt, 5.2, 1.3, [hx, hz]);
+    if (res === 'hit') {
+      bonk(this.h, ch.who, 3);
+      this.h.toast(`💥 CLETUS BONKED ${this.h.name(ch.who).toUpperCase()} WITH A BAT. "And STAY out!" (stolen goods taken back)`);
+      this.r.cletus.chase = null;
+    } else if (res === 'lost') {
+      this.h.toast('🏏 Cletus runs out of breath and shakes his bat at the horizon.');
+      this.r.cletus.chase = null;
+    }
+  }
+
+  /** Eating / scratching unpaid stock. True if it happened inside Rusty's store. */
+  unpaid(from: number): boolean {
+    const p = this.h.handOf(from);
+    if (!p) return false;
+    const [lx, lz] = toSetLocal(RUSTY_SET, p[0], p[2]);
+    if (!inStore(lx, lz)) return false;
+    if (this.r.cletus.watch) { this.h.toast('🚨 CLETUS: "YOU EATIN\' THAT WITHOUT PAYIN\'?!" (+1 heat)'); this.busted(from); }
+    else { this.h.toast('🤫 Ate the evidence.'); this.unseen.push({ who: from, at: this.time }); }
+    return true;
+  }
+
+  /**
+   * Parked-car crime. The client runs a minigame (siphon: Suck & Pinch, strip: Wrench Timing) and
+   * reports `ok` / `fail`. Pass = 80% clean; fail = no loot and you're caught.
+   */
+  private carAct(from: number, i: number, held: ItemState | undefined, res?: 'ok' | 'fail') {
+    const c = this.r.cars[i];
+    if (!c || !res) return true;
+    if (this.time - (this.heistAt.get(from) ?? -9) < 1) return true;
+    this.heistAt.set(from, this.time);
+    const alarm = i < 2; // the wash sedan and the SUV have alarms
+    const seen = res === 'fail' || Math.random() < 0.2;
+    if (held?.k === 'jerrycan') {
+      if (c.gas <= 0 || held.d >= 5) return true;
+      if (res === 'ok') {
+        c.gas--; held.d = Math.min(5, held.d + 1.5); this.sfx('pour');
+        this.h.toast(seen ? '⛽ +1.5 gal… but someone saw you!' : '⛽ Siphoned 1.5 gal. Tastes like crime.');
+      } else this.h.toast('🤮 MOUTHFUL OF GASOLINE. You cough loud enough to wake the dead.');
+    } else if (!held) {
+      if (c.parts <= 0) return true;
+      if (res === 'ok') {
+        const k = PART_ORDER[3 - c.parts]; c.parts--;
+        const p = this.h.items.spawn(k, false, 0, 0, 0); p.h = from; p.st = 1;
+        this.sfx('clank');
+        this.h.toast(`🔧 Got the ${itemName(k, 0).toLowerCase()} — Vinnie out back pays $${PART_SELL[k]}.${seen ? ' Somebody saw!' : ''}`);
+      } else {
+        this.sfx('clank');
+        this.h.toast(alarm ? '🚨 *CLANG* — WEE-OO WEE-OO! The car alarm goes off!' : '🔩 *CLANG* — the wrench slips. Loud.');
+        if (alarm) this.sfx('alarm');
+      }
+    } else return true;
+    if (seen) { this.h.toast(`🚨 "HEY! THAT'S MY ${i === 1 ? 'TRUCK' : 'CAR'}!" (+1 heat)`); this.busted(from); }
+    return true;
   }
 
   /** Fuel the RV from a held nozzle (called every 0.2 s while the button is held). */

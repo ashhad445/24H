@@ -21,6 +21,10 @@ export interface HostCtx {
   itemWorld(it: ItemState): [number, number, number] | null;
   charge(from: number, amount: number, what: string): boolean;
   credit(from: number, amount: number, what: string): void;
+  handOf(id: number): [number, number, number] | null;
+  fade(to: number, dur: number, ko?: boolean): void;
+  hurt(id: number, amount: number): void;
+  poison(id: number): void; // puke + lose health
   /** this stop */
   set: StaticSet;
   stopId: string;
@@ -37,7 +41,7 @@ export interface ViewCtx {
   reg(key: string, obj: THREE.Object3D, prompt: (st: any, c: PromptCtx, s: SharedState) => string): void;
   box(mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, cast?: boolean): THREE.Mesh;
   sign(lines: [string, number, string][], bg: string, w: number, h: number, px?: number, py?: number): THREE.Mesh;
-  play(name: string): void;
+  play(name: string, at?: [number, number, number] /* stop-local */): void;
 }
 
 export interface Component {
@@ -47,6 +51,10 @@ export interface Component {
   spawn?(h: HostCtx): void; // once, when the stop activates (host)
   act?(h: HostCtx, st: any, from: number, key: string): void;
   step?(h: HostCtx, st: any, dt: number): void;
+  /** a player ate / used unpaid stock: true if it happened in this part's store */
+  unpaid?(h: HostCtx, st: any, from: number): boolean;
+  /** someone is eating `it`: true if this part handles it (e.g. the Scorpion Challenge burger) */
+  eat?(h: HostCtx, st: any, from: number, it: ItemState): boolean;
   build(v: ViewCtx): void; // once (client)
   update?(v: ViewCtx, st: any, s: SharedState, dt: number, itemPos: (id: number) => THREE.Vector3 | null): void;
 }
@@ -90,6 +98,10 @@ export function makeHostCtx(base: Omit<HostCtx, 'set' | 'stopId' | 'world' | 'lo
     itemWorld: (it) => base.itemWorld(it),
     charge: (from, amount, what) => base.charge(from, amount, what),
     credit: (from, amount, what) => base.credit(from, amount, what),
+    handOf: (id) => base.handOf(id),
+    fade: (to, dur, ko) => base.fade(to, dur, ko),
+    hurt: (id, amount) => base.hurt(id, amount),
+    poison: (id) => base.poison(id),
     set, stopId,
     world: (lx, y, lz) => { const [x, z] = fromSetLocal(set, lx, lz); return [x, y, z]; },
     local: (wx, wz) => toSetLocal(set, wx, wz),
@@ -123,6 +135,9 @@ export function signTexture(lines: [string, number, string][], bg: string, w = 5
     const total = lines.reduce((a, l) => a + l[1] * 1.15, 0); let y = (h - total) / 2;
     for (const [text, size, color] of lines) {
       g.font = `900 ${size}px "Arial Black", Arial, sans-serif`; g.fillStyle = color;
+      // shrink long lines to fit instead of clipping them at the edges
+      const fit = Math.min(1, (w * 0.92) / Math.max(1, g.measureText(text).width));
+      if (fit < 1) g.font = `900 ${Math.floor(size * fit)}px "Arial Black", Arial, sans-serif`;
       g.fillText(text, w / 2, y + size * 0.6); y += size * 1.15;
     }
   });

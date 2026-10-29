@@ -44,13 +44,21 @@ export interface ItemState {
   s: string; // slot: '' | 'skillet' | 'rack'
   d: number; // patty: cook progress · tools: uses left · jerrycan: gallons · sponge: suds
   p: number; // unpaid store price in $ (0 = paid / not merchandise)
+  sl: number; // inventory slot 0–2 while carried, else −1
+  st?: number; // 1 = stolen goods (confiscated if you get bonked)
 }
+
+/** A shopkeeper / sheriff running a player down on foot (world space). */
+export interface ChaseState { who: number; x: number; z: number; t: number }
 
 export interface CrewState {
   hunger: number; // 0–100
   hypno: number; // 0–1 road hypnosis (driver)
   caf: number; // seconds of caffeine left
+  slot: number; // selected inventory slot 0–2
   spray: number; // seconds of extinguisher spray visual left
+  hp: number; // 0–100 health; 0 = passed out
+  drunk: number; // seconds of free-casino-drink wobble left
 }
 
 export interface CabinState {
@@ -69,21 +77,30 @@ export interface RustyState {
   slot: { res: number[]; left: number; spins: number }; // left = seconds of spin animation remaining
   derby: { phase: 0 | 1 | 2; t: number; pos: number[]; bets: [number, number][]; winner: number }; // 0 idle, 1 betting, 2 racing
   wash: { dirt: number[]; away: number }; // dirt per splat (0–2), seconds until the next dirty car
-  cletus: { watch: boolean; t: number };
+  cletus: { watch: boolean; t: number; chase: ChaseState | null };
+  cars: { parts: number; gas: number }[]; // parked cars: parts left to strip, siphon charges left
 }
 
 /** NPC vehicle (traffic, Sheriff Roscoe, the Loan Shark). World space. */
 export interface NPCState {
   id: number;
-  k: 'sedan' | 'pickup' | 'camper' | 'semi' | 'cop' | 'shark';
+  k: 'sedan' | 'pickup' | 'camper' | 'semi' | 'cop' | 'shark' | 'bandit';
   x: number; z: number; yaw: number;
   speed: number;
   c: number; // paint color index (traffic)
   w: number; // wrecked seconds left (0 = fine)
+  /** Wrecked cars are free bodies: world velocity, yaw rate, and barrel-roll angle (radians, client animates). */
+  vx?: number; vz?: number; spin?: number; roll?: number;
 }
 
-/** Police: 0 none, 1 chasing, 2 tailing, 3 pulled over (Roscoe at the window), 4 leaving. */
-export interface CopState { phase: 0 | 1 | 2 | 3 | 4; t: number; fled: boolean }
+/** A canyon boulder: falling (y > 0), rolling, or resting on the road. World space. */
+export interface Boulder { id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; broken: number /* seconds since it shattered, 0 = whole */ }
+
+/** Canyon bandits: 0 none, 1 driving in, 2 roadblock, 3 robbing / leaving. */
+export interface BanditState { phase: 0 | 1 | 2 | 3; t: number; near: number; fed: boolean; couch: [number, number, number] | null /* x, z, yaw */ }
+
+/** Police: 0 none, 1 chasing, 2 tailing, 3 pulled over (Roscoe at the window), 4 leaving, 5 on foot after a player. */
+export interface CopState { phase: 0 | 1 | 2 | 3 | 4 | 5; t: number; fled: boolean; foot?: ChaseState | null }
 
 export interface SharedState {
   rv: RVState;
@@ -92,6 +109,9 @@ export interface SharedState {
   npcs: NPCState[];
   cop: CopState;
   shark: { on: boolean; t: number };
+  mafia: { on: boolean; thugs: { id: number; x: number; z: number; hp: number }[] }; // late = the Bonetti crew hunts you; thugs wait at the chapel
+  boulders: Boulder[];
+  bandits: BanditState;
   rusty: RustyState;
   stops: Record<string, Record<string, any>>; // kit-built stops: stopId → partId → state
   cab: CabinState;
@@ -101,6 +121,7 @@ export interface SharedState {
   clock: number; // elapsed game seconds since the run started
   seats: { driver: number; nav: number }; // peer ids, −1 = empty
   heat: number;
+  wanted: number; // last player caught stealing (−1 = nobody); Roscoe goes after them on foot
   phase: 'drive' | 'ended';
   ending: string;
 }
@@ -120,10 +141,14 @@ export type GameMsg =
   | { t: 'pose'; p: Pose }
   | { t: 'drive'; i: DriveInput }
   | { t: 'act'; id: string; btn: number }
+  | { t: 'shoot'; o: [number, number, number]; d: [number, number, number] }
   | { t: 'drop'; inRV: boolean; p: [number, number, number]; v: [number, number, number] }
   | { t: 'ev'; k: 'toast'; text: string }
   | { t: 'ev'; k: 'sfx'; name: string; at?: [number, number, number] }
   | { t: 'ev'; k: 'text'; from: string; text: string }
   | { t: 'ev'; k: 'emote'; who: number; what: 'slap' | 'eat' | 'wave' }
   | { t: 'ev'; k: 'jolt'; mag: number }
-  | { t: 'ev'; k: 'fed'; to: number; stam: number };
+  | { t: 'ev'; k: 'fade'; to: number; dur: number; ko?: boolean } // ko = knocked out (bat / taser), not Tammy
+  | { t: 'ev'; k: 'fed'; to: number; stam: number }
+  | { t: 'ev'; k: 'puke'; to: number }
+  | { t: 'ev'; k: 'wake'; to: number }; // passed out: wake up on the RV floor

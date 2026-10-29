@@ -314,6 +314,76 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] **Nitrous (NOS)**: blue tank on the dash with 3 charge lights, starts full (3 shots). Driver presses **N**: 5 s burn (+7 m/s², rev limiter lifted 25%, blue flame at the exhaust, FOV/blue vignette/rumble, 🔥 on the gear panel). Refill by pouring **Rocket fuel** (item `rocket`: $55 at Rusty's, $85 at Last Chance Gas) into the tank. Tunables: `NOS` in `config.ts`
 - [x] **Rear-view mirror charm**: a tiny coffin (`charm2`, 20 dark-joke quotes in `CHARM2_QUOTES`) with the same pendulum physics as the skull
 - [x] **Rocks**: roadside rock piles every other chunk (`World.chunkRocks`, 6 rocks each, view in `world/RockPiles.ts`, host tracks what's left). Pick up one at a time (E), stash them in the **rock bin** by the rear window (12 max; E to store / take out), open the **rear window hatch** (click the latch) and throw with RMB (32 m/s, light aim assist). 3 hits wreck Roscoe's cruiser: chase over, heat cleared, wreck towed after 14 s (`TrafficSim.hitCop`). Test: `npx tsx scripts/sim-phase7.ts`
+- [x] **Plot change — the stash**: the crew now delivers a bag of weed (`weed` item, starts in the RV) to the wedding. Drive through the arch with it (within 25 m of the RV) = win; without it = "NO STASH". Miss 24:00 and the **Bonetti mafia** wakes up (`s.mafia.on`): a black Cadillac (the shark car, 4 bullets) chases non-stop and 6 goons wait at the chapel and shoot the RV. Win by delivering (even late) **or** killing every goon
+- [x] **Pistol** (`pistol`, 12 rounds, LMB fires a hitscan ray; `GameMsg 'shoot'`): bought from **Vinnie** behind Rusty's ($120, ammo box $20). Cops take 3 hits, mafia cars 4, civilian cars wreck at once (+1 heat), goons 2
+- [x] **Behind Rusty's**: Tammy ($25 favor — only the acceptor gets a ~6 s blackout + kiss sounds and drops to 25% hunger/stamina; 20 game-min cooldown). 3 junkers + the wash sedan + the SUV can be **stripped** (battery / catalytic converter / wheel, sold to Vinnie $40 / $90 / $30) or **siphoned** (3 charges each)
+- [x] **3-slot inventory**: mouse wheel or 1/2/3 switches the item in hand (`slot:N` act, `ItemState.sl`, `CrewState.slot`)
+- [x] Fixes: car-wash mud (transparent splats were skipped by the reticle ray), scratch-offs (LMB now uses them). Speed cameras every 20 chunks (5 km). 18 new dark billboards + **"SPEED UNTIL YOU DIE"** board (every 12 chunks): no cameras for 3 km after it (`noLimitAt`)
+- [x] Radio: hiss almost gone, hosts use different (preferably neural) browser voices, podcast has a quiet music bed, new station KRYP 107.7, more dark jokes. Test: `npx tsx scripts/sim-phase8.ts`
+- [x] **Crime has teeth** (`stops/chase.ts`, `chaseView.ts`, `CarHeist.ts`):
+  - Cletus and every kit-shop clerk come after you with a bat when they see a theft. That includes eating or scratching unpaid stock inside the store, and stuff they notice missing when they look up from the paper. If they catch you, you black out and the stolen goods (`it.st`) are taken back.
+  - Roscoe gets out of the cruiser (`cop.phase 5`) when the wanted player (`s.wanted`) is on foot, or when nobody pays within 20 s. His taser blacks you out and he takes the fine plus $25. If the RV drives off while he's out, that counts as fleeing.
+  - Car stripping and siphoning are client minigames:
+    - Siphon is **Suck & Pinch**: hold to suck, release in the green band.
+    - Strip is **Wrench Timing**: click in the green arc, once per bolt.
+    - The client sends `rusty:carN:ok|fail` to the host.
+    - Pass → 80% clean. Fail → +1 heat and a chase.
+    - The wash car and the SUV have alarms.
+  - The RV starts with 2 full 5-gal jerrycans. Test: `npx tsx scripts/sim-phase9.ts`
+- [x] **Health, canyon dangers, crash physics, bribes, livelier stops** (test: `npx tsx scripts/sim-phase10.ts`):
+  - **Health** (`CrewState.hp`, tunables `HP` in `config.ts`):
+    - Hunger under 20% slowly drains it, and empty hunger drains it faster. A full belly regenerates it.
+    - Crashes hurt anyone standing (not seated). Bonks and tasers cost 10. Raw or burnt food = puke + −15.
+    - At 0 hp you pass out: blackout, wake on the RV floor at 35 hp, $40 "Desert Urgent Care" bill.
+    - Vultures circle the RV while anyone is under 25 hp (`world/Vultures.ts`).
+  - **Potholes** are bigger (r 0.8–1.4) with a grey patch, an orange spray-paint ring, cones, and hand-painted warning signs 200 m ahead ("HOAL" in the canyon).
+  - **Devil's Canyon**:
+    - Rockfall (`world/Canyon.ts`, `CanyonView.ts`): boulders drop off the cliffs ahead every 20–35 s and land on the road. Hitting one costs 10 integrity; one landing on the roof costs 15.
+    - Bandits (`TrafficSim.stepBandits`): 50% once per canyon run. Two pickups overtake and park sideways as a roadblock with a couch. Stop near them for 2 s and they take all the money (half if you hand them food).
+    - Ways past the bandits: ram through, squeeze by on the shoulder, or shoot (2 hits each).
+  - **Crash physics** (`geom.obbMtv`, `TrafficSim.collide`):
+    - The boxes push apart and trade momentum by mass. Masses: RV 5, sedan 1.4, semi 14.
+    - Glancing hits twist the RV. Wrecked cars become free bodies that skid and spin, and light cars barrel-roll on big hits.
+    - Buildings: the RV slides along walls instead of stopping dead.
+  - **Bribes**: hand Roscoe food at the window.
+    - A cheeseburger always works. A burger works if heat ≤ 2, coffee if heat ≤ 1.
+    - Burnt or raw food gives +1 heat.
+    - The stash: he hands it back, takes −1 heat, then tails you for 30 s, giggling on the bullhorn.
+    - A drunk driver adds a $50 DUI.
+  - **Speed cameras**:
+    - Placement is deterministic: never inside a no-limit zone, never within 800 m of a stop. It no longer depends on loaded clear-zones.
+    - They fire on crossing the gantry line, so no frame can skip one.
+  - **Diner** (`stops/diner.ts`):
+    - Checkered floor, red booths, stools, menu board, pie case, ceiling fans, neon EAT sign.
+    - Regulars: a trucker, a couple, a guy asleep in his pancakes (snores), a kid kicking the booth, and a cowboy who hates the jukebox. A parked semi outside.
+    - **Scorpion Challenge**: $15 for a 4-lb burger, 4 bites (7 s chew each) in 60 s. Win $40 and a spot on the Wall of Fame. Come hungry, or you might puke.
+  - **Casino** (`stops/casino.ts`):
+    - 4 more slots (Wedding Bells, Divorce 777).
+    - Big Wheel: 2× / 5× / 10× / 🌵 cactus.
+    - Dice table: real thrown dice. 7 or 11 pays 2×.
+    - Coin pusher: slapping it can tilt it and get you bonked.
+    - Claw machine: a one-button timing drop and a 40% grip.
+    - A cocktail waitress with free drinks (drunk = wobbly camera + steering drift).
+    - Elvis, a cashier cage, gamblers on "DAY 3", chandeliers, carpet.
+    - The bouncer KOs anyone with 3 big wins in a row.
+  - New poses `sit / eat / sleep / kick / slots / sing` in `models/Character.ts`. New items: scorpion burger, cocktail, cactus, stuffed scorpion, toy card, dice.
+- [x] **Blender models** (`art/*.py` → `public/models/*.glb`; listed in `public/models/index.json`, loaded by `core/AssetLoader.ts`):
+  - **Build:** run with the Blender MCP: `exec(open(r'E:\24H\art\people.py').read())`. `art/lib.py` holds the shared helpers; author in game coordinates with `G(x,y,z)`.
+  - **Fallback:** everything stays procedural until the models load, or if a file is missing.
+  - **Tinting:** materials named `tint_*` get recolored per use (shirt, skin, hat, trim, awning…).
+  - **`desert.glb`:** saguaros, Joshua trees, barrel/prickly-pear cacti, rocks, shrubs, layered mesas, canyon cliffs, power pole. They are baked into vertex colors and instanced in `World` (`sceneryVariants`).
+  - **`people.glb`:**
+    - The human kit is split into parts at the same joints `Character` animates, so every pose still works. Parts: legs/boots, torso with belt, head with nose/ears/brows, arms with hands, gut.
+    - Clothing: vest, apron, tie, badge.
+    - Hair, beard, mustache.
+    - Hats: cowboy, sheriff, cap, trucker, hardhat, beehive.
+    - `Character.useKit()` swaps it in; eyes and mouth stay procedural.
+  - **`buildings.glb`:**
+    - Kit pieces: window, door frame, awning, cornice, plinth, pilaster, drain pipe, AC, vent, dish, wall lamp, bulb strings, casino portal.
+    - Hero piece: a scorpion roof statue for the diner.
+    - Yard props: dumpster, trash can, barrel, crate, tires, bench, picnic table, news box.
+    - `stops/buildingKit.ts` `dressBuilding()` fits the kit to any `building()` rect and to Rusty's store. Colliders don't change. Signs move up to rooftop boards, walls get a plaster texture, and new options are `windows / pilasters / portal`.
+  - Fixes: canyon cliffs no longer bury the Canyon Junkyard; sign text shrinks to fit instead of clipping.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 

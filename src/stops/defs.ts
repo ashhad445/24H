@@ -3,7 +3,14 @@ import * as THREE from 'three';
 import { MAT, type StopDef } from './kit';
 import { makeNpc } from '../models/npcs';
 import { blackjack, grillJob, jukebox, roulette, slots } from './games';
+import { dinerDecor, scorpionChallenge } from './diner';
+import { bigWheel, casinoDecor, clawMachine, cocktailWaitress, coinPusher, diceTable, elvis } from './casino';
+import { kitProp } from './buildingKit';
 import { bed, building, decor, iceMachine, junkCars, lot, pawn, pumps, pylon, scrap, shop, table, vending } from './parts';
+
+/** Blender yard props: [kit name, x, z, rotY?, scale?, y?] (visual), plus optional colliders. */
+const yard = (id: string, props: [string, number, number, number?, number?, number?][], colliders: { x0: number; x1: number; z0: number; z1: number }[] = []) =>
+  decor(id, (v) => { for (const [n, x, z, r, s, y] of props) kitProp(v.group, n, x, z, r ?? 0, s ?? 1, y ?? 0); }, colliders);
 
 const canopy = (x0: number, x1: number, z0: number, z1: number, h: number, title: string) => decor('canopy', (v) => {
   v.box(MAT.white, x0, x1, h, h + 0.5, z0, z1, true);
@@ -22,7 +29,11 @@ const diner: StopDef = {
   parts: [
     lot({ x0: 5, x1: 50, z0: -30, z1: 30 }),
     building({ id: 'bldg', ...DINER, h: 4, door: [-2, 0], wall: '#80cbc4', roof: '#00695c', floor: '#eceff1',
-      sign: { lines: [['LUCKY SCORPION', 64, '#ffeb3b'], ['DINER · PIE · COFFEE', 40, '#fff']], bg: '#004d40', w: 7, h: 1.3 }, light: '#fff3e0' }),
+      sign: { lines: [['LUCKY SCORPION', 64, '#ffeb3b'], ['DINER · PIE · COFFEE', 40, '#fff']], bg: '#004d40', w: 7, h: 1.3 }, light: '#fff3e0',
+      trim: '#f5f5f5', awning: '#e53935', accent: '#e53935' }),
+    yard('yard', [['scorpion', 27, 5, Math.PI / 2 + 0.5, 1.3, 4.12], ['dumpster', 38.5, -6, Math.PI / 2], ['trashcan', 18.9, 1.4], ['trashcan', 18.9, 2.2, 1],
+      ['newsbox', 18.9, -3.4, Math.PI / 2], ['bench', 18.6, -6.5, Math.PI / 2], ['picnic', 12, -18, 0.3], ['picnic', 13, 16, -0.2]],
+      [{ x0: 37.6, x1: 39.4, z0: -7, z1: -5 }]),
     // counter: checkout end by the register, pastry case for goods
     shop({ id: 'shop', clerkName: 'Flo', clerkColor: '#ec407a',
       products: [['burger', 8, 3], ['cheeseburger', 10, 2], ['coffee', 2, 3], ['soda', 2, 3], ['energy', 4, 2]],
@@ -30,6 +41,8 @@ const diner: StopDef = {
       checkout: { x0: 27, x1: 28, z0: -6, z1: 4, top: 1.05 }, register: [27.5, 1.05, -5.3], clerk: [29, -3.5], store: DINER }),
     grillJob('grill', { x0: 33, x1: 34, z0: -7, z1: -5, top: 1.0 }, [27.5, 1.08, 2.6], [34.8, 1.5], 8, 6),
     jukebox('juke', [35.3, 6.6], 1),
+    dinerDecor('dressing'),
+    scorpionChallenge('scorpion', [27.5, 1.05, -1.6]),
     table('booth1', { x0: 20.3, x1: 21.6, z0: -8.6, z1: -7 }, 0.78, 'white'),
     table('booth2', { x0: 20.3, x1: 21.6, z0: -5.4, z1: -3.8 }, 0.78, 'white'),
     table('booth3', { x0: 20.3, x1: 21.6, z0: 2.4, z1: 4 }, 0.78, 'white'),
@@ -53,7 +66,9 @@ const junkyard: StopDef = {
       v.box(MAT.rust, 12, 12.3, 0, 3.6, -6.3, -6); v.box(MAT.rust, 12, 12.3, 0, 3.6, 6, 6.3);
     }, fence.map(([x0, x1, z0, z1]) => ({ x0, x1, z0, z1 }))),
     building({ id: 'shack', ...SHACK, h: 3.2, door: [-11, -9], wall: '#8d6e63', roof: '#4e342e', floor: '#6d4c41',
-      sign: { lines: [['DUSTY\'S', 70, '#ffd54f'], ['WE BUY ANYTHING', 40, '#fff']], bg: '#3e2723', w: 4, h: 1 } }),
+      sign: { lines: [['DUSTY\'S', 70, '#ffd54f'], ['WE BUY ANYTHING', 40, '#fff']], bg: '#3e2723', w: 4, h: 1 }, trim: '#6d4c41', accent: '#8a4a26' }),
+    yard('yard', [['tires', 14.5, -16], ['tires', 15.2, -17.2, 0.5], ['barrel', 14.6, -4.5], ['barrel', 15.3, -4.1], ['crate', 25, -15.5, 0.3], ['crate', 25.1, -15.5, 0.1, 1, 0.6], ['dumpster', 27, -3, 0]],
+      [{ x0: 26, x1: 28, z0: -3.7, z1: -2.3 }]),
     pawn('pawn', [21.5, 0.9, -8.2], 'Dusty'),
     decor('dusty', (v) => { const d = makeNpc('dusty'); d.position.set(22.8, 0, -8.2); d.rotation.y = Math.PI / 2; v.group.add(d); }),
     vending('soda', [15.6, -3], 'soda', 2, '#c62828', 'COLA'),
@@ -74,10 +89,11 @@ const motel: StopDef = {
   parts: [
     lot({ x0: 5, x1: 60, z0: -35, z1: 35 }),
     building({ id: 'office', ...OFFICE, h: 3.4, door: [-19, -17], wall: '#ffcc80', roof: '#bf360c', floor: '#a1887f',
-      sign: { lines: [['OFFICE', 80, '#fff']], bg: '#bf360c', w: 3, h: 0.8 } }),
+      sign: { lines: [['OFFICE', 80, '#fff']], bg: '#bf360c', w: 3, h: 0.8 }, trim: '#fff3e0', awning: '#00897b', accent: '#00897b' }),
     vending('energy', [16, -11.5], 'energy', 4, '#33691e', 'VOLT'),
     building({ id: 'room6', ...ROOM6, h: 3.2, door: [2, 4], wall: '#ffe0b2', roof: '#bf360c', floor: '#5d4037',
-      sign: { lines: [['ROOM 6', 80, '#3e2723']], bg: '#ffd54f', w: 2, h: 0.6 }, light: '#ffcc80' }),
+      sign: { lines: [['ROOM 6', 80, '#3e2723']], bg: '#ffd54f', w: 2, h: 0.6 }, light: '#ffcc80', trim: '#fff3e0', accent: '#00897b' }),
+    yard('yard', [['trashcan', 25.5, -2.5], ['bench', 25.6, -9.5, Math.PI / 2], ['crate', 37, -27, 0.4], ['dumpster', 38, 22, Math.PI / 2]], [{ x0: 37.1, x1: 38.9, z0: 21, z1: 23 }]),
     bed('bed', [32.5, 3], 40, 4, 'Room 6'),
     decor('rooms', (v) => {
       // the rest of the motel row: doors and windows on a long block
@@ -111,18 +127,32 @@ const casino: StopDef = {
   parts: [
     lot({ x0: 5, x1: 70, z0: -40, z1: 40 }),
     building({ id: 'bldg', ...CASINO, h: 5, door: [-2, 2], wall: '#4a148c', roof: '#1a0033', floor: '#7f0000',
-      sign: { lines: [['RUSTY CACTUS', 70, '#ffd54f'], ['CASINO', 90, '#ff4081']], bg: '#1a0033', w: 9, h: 2 }, light: '#ff80ab' }),
+      sign: { lines: [['RUSTY CACTUS', 70, '#ffd54f'], ['CASINO', 90, '#ff4081']], bg: '#1a0033', w: 9, h: 2 }, light: '#ff80ab',
+      trim: '#ffd54f', accent: '#ff4081', windows: false, pilasters: 4.5, portal: true }),
+    decor('marquee', (v) => {
+      // chasing bulbs along the front cornice and round the door
+      for (let z = CASINO.z0; z < CASINO.z1; z += 1) kitProp(v.group, 'bulbs', CASINO.x0 - 0.55, z + 0.5, Math.PI / 2, 1, 5.42);
+    }),
+    yard('yard', [['trashcan', 16.8, 6], ['trashcan', 16.8, -7], ['dumpster', 46, -14, Math.PI / 2], ['crate', 46, -10.5, 0.2]], [{ x0: 45.1, x1: 46.9, z0: -15, z1: -13 }]),
     slots('hr1', [43.3, -14], 25, 300, 1000, 'HIGH ROLLER', '#b71c1c'),
     slots('hr2', [43.3, -11], 25, 300, 1000, 'HIGH ROLLER', '#b71c1c'),
     slots('pen1', [43.3, 11], 5, 100, 250, 'PENNY 777', '#1565c0'),
     slots('pen2', [43.3, 14], 5, 100, 250, 'PENNY 777', '#1565c0'),
+    slots('wb1', [43.3, -5], 10, 150, 500, 'WEDDING BELLS', '#f06292'),
+    slots('wb2', [43.3, -2], 10, 150, 500, 'WEDDING BELLS', '#f06292'),
+    slots('dv1', [43.3, 2], 10, 200, 600, 'DIVORCE 777', '#37474f'),
+    slots('dv2', [43.3, 5], 10, 200, 600, 'DIVORCE 777', '#37474f'),
     roulette('roulette', [31, -8], 10),
     blackjack('bj', [31, 9], 20),
+    bigWheel('wheel', [24, -17.3]),
+    diceTable('dice', [24, 6]),
+    coinPusher('pusher', [37, -16.9]),
+    clawMachine('claw', [37, 17]),
+    cocktailWaitress('waitress', [26.5, -1.5]),
+    elvis('elvis', [35.5, 0]),
+    casinoDecor('dressing'),
     decor('bouncer', (v) => {
       const b = makeNpc('bouncer'); b.position.set(16.6, 0, -3.6); b.rotation.y = Math.PI / 2; v.group.add(b);
-      const rope = new THREE.MeshStandardMaterial({ color: '#b71c1c' });
-      for (const z of [-5, 5]) v.box(MAT.steel, 15.9, 16.1, 0, 1, z - 0.1, z + 0.1);
-      v.box(rope, 15.95, 16.05, 0.8, 0.85, -5, -2.2);
     }),
     decor('neon', (v) => {
       // a giant neon saguaro on the roof
@@ -145,7 +175,10 @@ const lastChance: StopDef = {
     canopy(8, 17.5, -9, 9, 5.2, 'LAST CHANCE'),
     pumps('pump', [[12, -4], [12, 4]], 4),
     building({ id: 'store', ...LCSTORE, h: 3.6, door: [-3, -1], wall: '#bcaaa4', roof: '#3e2723', floor: '#8d6e63',
-      sign: { lines: [['LAST CHANCE', 64, '#ffeb3b'], ['NEXT GAS: NEVER', 40, '#fff']], bg: '#b71c1c', w: 6, h: 1.2 } }),
+      sign: { lines: [['LAST CHANCE', 64, '#ffeb3b'], ['NEXT GAS: NEVER', 40, '#fff']], bg: '#b71c1c', w: 6, h: 1.2 },
+      trim: '#d7ccc8', awning: '#b71c1c', accent: '#b71c1c' }),
+    yard('yard', [['newsbox', 28.8, -5, Math.PI / 2], ['trashcan', 28.9, 0.5], ['barrel', 43.5, -9], ['tires', 43.5, 4.5], ['dumpster', 44, -3, Math.PI / 2]],
+      [{ x0: 43.1, x1: 44.9, z0: -4, z1: -2 }]),
     shop({ id: 'shop', clerkName: 'Earl', clerkColor: '#546e7a',
       products: [['patty', 5, 4], ['bun', 2.5, 4], ['cheese', 2, 3], ['coffee', 4, 3], ['energy', 6, 3], ['soda', 3, 3],
         ['coolant', 18, 2], ['tape', 12, 2], ['fuse', 5, 2], ['spare', 90, 1], ['rocket', 85, 1]],

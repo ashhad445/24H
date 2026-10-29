@@ -163,6 +163,13 @@ export class Player {
     return null;
   }
 
+  /** Passed out: the crew drags you onto the RV floor (seated players stay put). */
+  wakeInRV() {
+    if (this.seat) return;
+    if (!this.inRV) this.setInRV(true);
+    this.pos.set(0.2, RV.floorY, 1.6); this.vel.set(0, 0, 0); this.pitch = 0.4;
+  }
+
   /** Switch between RV-local and world frames, preserving world position & velocity. */
   setInRV(v: boolean, rvSpeed = 0) {
     if (v === this.inRV) return;

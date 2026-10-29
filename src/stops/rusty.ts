@@ -12,7 +12,7 @@ const Z0 = -RUSTY_MILE / CFG.MILES_PER_METER;
 const [FX, FZ] = roadPoint(Z0, ROAD_HALF - 2.45);
 export const RUSTY_FRAME = { x: FX, z: FZ, yaw: roadYaw(Z0) };
 
-export const PRICES = { gas: 2.5, slot: 5, crab: 15, crabWin: 45, wash: 35, overdraftLimit: -100 };
+export const PRICES = { gas: 2.5, slot: 5, crab: 15, crabWin: 45, wash: 35, overdraftLimit: -100, pistol: 120, ammo: 20, favor: 25 };
 
 // ---------- layout ----------
 export const LOT = { x0: 5.6, x1: 70, z0: -45, z1: 45 };
@@ -49,6 +49,17 @@ export const SUV = { x: 62, z: -26, len: 4.8, wid: 2.0 };
 export const SUV_CAP: [number, number, number] = [60.98, 1.1, -24.9];
 export const SIGN: [number, number] = [8, 30];
 
+// ---------- behind the store: the shady corner ----------
+export const DEALER: [number, number, number] = [56.8, 0, -4.2];
+export const DEALER_CRATE = { x0: 55.2, x1: 56.2, z0: -5.2, z1: -3.2, top: 0.85 };
+export const AMMO_BOX: [number, number, number] = [55.7, 0.85, -3.6];
+export const TAMMY: [number, number, number] = [56.8, 0, 4.6];
+/** Junkers parked along the back fence (length along z, like the SUV). Cars 0 = wash sedan, 1 = SUV, 2+ = these. */
+export const JUNKERS = [{ x: 62, z: 6, color: '#8d6e63' }, { x: 62, z: 13, color: '#455a64' }, { x: 67, z: 9.5, color: '#ad1457' }];
+export const CAR_COUNT = 2 + JUNKERS.length;
+export const PART_ORDER = ['battery', 'cat', 'wheel'];
+export const PART_SELL: Record<string, number> = { battery: 40, cat: 90, wheel: 30 };
+
 /** Building interior used for shoplifting checks. */
 export const inStore = (x: number, z: number) => x > STORE.x0 && x < STORE.x1 && z > STORE.z0 && z < STORE.z1;
 /** Checkout zone: the end of the counter by the register (the scratch-off display is further down). */
@@ -82,7 +93,8 @@ export function rustyColliders(): Box2[] {
     wall(WASH.x0, WASH.x1, WASH.z0 - t, WASH.z0), wall(WASH.x0, WASH.x1, WASH.z1, WASH.z1 + t),
     { x0: SEDAN.x - SEDAN.len / 2, x1: SEDAN.x + SEDAN.len / 2, z0: SEDAN.z - SEDAN.wid / 2, z1: SEDAN.z + SEDAN.wid / 2, top: 1.45 },
     { x0: SUV.x - SUV.wid / 2, x1: SUV.x + SUV.wid / 2, z0: SUV.z - SUV.len / 2, z1: SUV.z + SUV.len / 2, top: 1.85 },
-    { ...CRATE },
+    { ...CRATE }, { ...DEALER_CRATE },
+    ...JUNKERS.map((j) => ({ x0: j.x - 1, x1: j.x + 1, z0: j.z - 2.2, z1: j.z + 2.2, top: 1.5 })),
     { x0: BUCKET[0] - 0.22, x1: BUCKET[0] + 0.22, z0: BUCKET[2] - 0.22, z1: BUCKET[2] + 0.22, top: 0.4 },
     // sign pole
     { x0: SIGN[0] - 0.3, x1: SIGN[0] + 0.3, z0: SIGN[1] - 0.3, z1: SIGN[1] + 0.3 },

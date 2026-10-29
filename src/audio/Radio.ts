@@ -116,6 +116,17 @@ export function talkLine(r: () => number, c: TalkCtx): string {
     `Road hypnosis is real, folks. If the white lines start talking to you, pull over. Or honk. Honking helps everything.`,
     `Dusty at the Canyon Junkyard will buy anything. He bought my first marriage. Long story.`,
     `Coming up after the break: is the desert getting bigger, or are you just driving slower? Our expert says yes.`,
+    `Breaking: local man dies peacefully in his sleep. His wife, who was driving at the time, is being questioned.`,
+    `Sponsor message: Bonetti Family Funeral Parlor. We'll bury your mistakes. Literally. No questions, cash only.`,
+    `A cheating husband was found in the desert today. Police say it's the third one this week. The coyotes are well fed and morally neutral.`,
+    `Dating tip: if she says she's seeing other people, she's seeing other people. If she says she's seeing a therapist, she's seeing you.`,
+    `Remember folks, drink responsibly. Or irresponsibly, but then don't drive. Or do. We're a radio station, not your mother.`,
+    `Sheriff Roscoe wants you to know his hands are clean, his gun is loaded, and the body count in this county is statistically insignificant.`,
+    `This hour's love song is dedicated to the guy in the beige RV. She's not coming back, buddy. Neither is the security deposit.`,
+    `Hot tip from your host: the fastest way to lose weight is stress, heartbreak, and the gas-station sushi. Pick one.`,
+    `If you're pregnant, congratulations. If you're not, congratulations. Everyone's a winner. Except the baby.`,
+    `The mortality rate is steady at one hundred percent. We've been tracking it for years. No improvement.`,
+    `A local priest says confession is free. A local lawyer says, don't.`,
   ];
   if (c.storm > 0.3) lines.push(`Weather update: there's a sandstorm. You know there's a sandstorm. Wipers on, windows up, mouths closed.`);
   else lines.push(c.hour >= 19 || c.hour < 6 ? `Clear skies tonight, folks. Turn your headlights on. Your headlights. The knob on the left.` : `Weather: hot. Tomorrow: also hot. Ten-day forecast: we're in a desert.`);
@@ -214,11 +225,11 @@ export class Radio {
     const st = RADIO_STATIONS[this.station];
     this.tuneBurst = Math.max(0, this.tuneBurst - 1 / 60);
     // quiet bed of static; only bad reception (storms, canyon) or a tuning sweep brings it up
-    const hiss = f.on ? Math.min(0.14, Math.max(0, 0.88 - f.signal) * 0.1 + this.tuneBurst * 0.16 + 0.0008) : 0;
+    const hiss = f.on ? Math.min(0.06, Math.max(0, 0.6 - f.signal) * 0.08 + this.tuneBurst * 0.07) : 0;
     const flutter = f.signal < 0.6 ? 0.75 + 0.25 * Math.sin(now * 2.3) * Math.sin(now * 0.7) : 1; // fading reception
     this.staticG.gain.setTargetAtTime(hiss, now, 0.08);
     this.levelG.gain.setTargetAtTime(on ? f.level : 0, now, 0.15);
-    this.music.gain.setTargetAtTime((st?.genre === 'talk' ? 0.12 : st?.genre === 'podcast' ? 0 : 0.5) * flutter * (this.tuneBurst > 0.2 ? 0.2 : 1), now, 0.1);
+    this.music.gain.setTargetAtTime((st?.genre === 'talk' ? 0.12 : st?.genre === 'podcast' ? 0.09 : 0.5) * flutter * (this.tuneBurst > 0.2 ? 0.2 : 1), now, 0.1);
     this.muffleF.frequency.setTargetAtTime(20000 * (1 - f.muffle) + 700 * f.muffle, now, 0.1);
     if (!f.on || !st) return;
 
@@ -244,7 +255,7 @@ export class Radio {
       if (this.step >= total) {
         // song over: DJ bumper, short gap, next song
         this.gapUntil = this.nextT + 1.2;
-        if (st.genre !== 'talk' && this.r() < 0.7) { const b = bumper(this.r, st.call, st.freq, st.tag, s); this.onSay(b, st.call, f.level * f.signal); this.duckFor(b.length * 0.07); }
+        if (st.genre !== 'talk' && st.genre !== 'podcast' && this.r() < 0.7) { const b = bumper(this.r, st.call, st.freq, st.tag, s); this.onSay(b, st.call, f.level * f.signal); this.duckFor(b.length * 0.07); }
         this.newSong(bedGenre(st.genre), 0);
         this.nextT = this.gapUntil;
         continue;
@@ -270,7 +281,7 @@ export class Radio {
     const st = RADIO_STATIONS[station];
     if (!st) return;
     // tune in mid-song, like a real radio
-    if (st.genre === 'podcast') { this.song = null; this.podQueue = [...PODCAST_INTRO]; this.talkNext = this.ctx.currentTime + 1.0; return; }
+    if (st.genre === 'podcast') { this.newSong(bedGenre(st.genre), 0); this.podQueue = [...PODCAST_INTRO]; this.talkNext = this.ctx.currentTime + 1.0; return; }
     this.newSong(bedGenre(st.genre), st.genre === 'talk' ? 0 : Math.floor(this.r() * 12) * 16);
     this.talkNext = this.ctx.currentTime + 1.2;
   }

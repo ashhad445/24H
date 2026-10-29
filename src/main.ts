@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { CFG, DEV, PLAYER, gearInfo } from './config';
 import { Input } from './core/Input';
+import { Assets } from './core/AssetLoader';
 import { Sound } from './core/Sound';
 import { KINDS, itemName } from './items/Items';
 import { ItemViews } from './items/ItemViews';
@@ -14,6 +15,7 @@ import { Player } from './player/Player';
 import { RVModel } from './rv/RV';
 import { RUSTY_FRAME, RUSTY_SET } from './stops/rusty';
 import { RustyView } from './stops/RustyView';
+import { CarHeist } from './stops/CarHeist';
 import { TrafficView } from './traffic/TrafficView';
 import { ChapelView } from './stops/ChapelView';
 import { StopsView } from './stops/Stops';
@@ -23,8 +25,11 @@ import type { GameMsg, ItemState, Pose, SharedState } from './types';
 import { HUD } from './ui/HUD';
 import { runLobby } from './ui/Lobby';
 import { setupSettings } from './ui/Settings';
+import { Vultures } from './world/Vultures';
+import { CanyonView } from './world/CanyonView';
 import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadX, roadYaw } from './world/World';
 import { RockPiles } from './world/RockPiles';
+import { MafiaView } from './traffic/MafiaView';
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -46,6 +51,7 @@ addEventListener('resize', () => {
 });
 
 const world = new World(scene);
+void Assets.preload(); // Blender models; everything falls back to procedural until they arrive
 const rv = new RVModel();
 scene.add(rv.root);
 /** World-space dynamic objects (items and avatars outside the RV). */
@@ -87,9 +93,14 @@ player.statics.push(RUSTY_SET);
 const rusty = new RustyView(scene);
 const traffic = new TrafficView(scene, rv);
 const chapel = new ChapelView(scene);
+const vultures = new Vultures(scene);
+const canyonView = new CanyonView(scene);
 const rockPiles = new RockPiles();
 scene.add(rockPiles.group);
-const stopsView = new StopsView(scene, player.statics, (n) => sound.play(n));
+const mafiaView = new MafiaView();
+scene.add(mafiaView.group);
+const stopsView = new StopsView(scene, player.statics, (n, at) => sound.play(n, at));
+const heist = new CarHeist(camera, (n) => sound.play(n));
 const mapView = new MapView();
 const avatars = new Map<number, Avatar>();
 const raycaster = new THREE.Raycaster();
@@ -107,6 +118,7 @@ const isDescendant = (o: THREE.Object3D | null, of: THREE.Object3D) => { for (; 
 
 async function start() {
   const net: Net = await runLobby();
+  await Assets.wait(5000);
   lobbyLoop = false;
   rv.body.add(camera);
   hud.show();
@@ -125,7 +137,14 @@ async function start() {
     else if (m.k === 'emote') avatars.get(m.who)?.char[m.what]();
     else if (m.k === 'text') { hud.text(m.from, m.text); sound.play('buzz'); }
     else if (m.k === 'jolt') player.jolt(m.mag);
+    else if (m.k === 'fade' && m.to === net.myId) {
+      hud.blackout(m.dur);
+      if (m.ko) { heist.cancel(); player.stamina = Math.max(0, player.stamina - 30); }
+      else { sound.play('kiss'); player.stamina = Math.min(player.stamina, 25); }
+    }
     else if (m.k === 'fed' && m.to === net.myId) player.stamina = Math.min(100, Math.max(0, player.stamina + m.stam));
+    else if (m.k === 'puke' && m.to === net.myId) { hud.puke(); hud.hurt(0.3); }
+    else if (m.k === 'wake' && m.to === net.myId) setTimeout(() => player.wakeInRV(), 2500); // moved while the screen is black
   };
 
   if (isHost) {
@@ -210,7 +229,21 @@ async function start() {
   let last = performance.now();
   let snapAcc = 0, poseAcc = 0, sprayAcc = 0, holdAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
   /** Interactions that repeat while the button is held (pumping gas, siphoning). */
-  const HOLD_IDS = new Set(['fuelport', 'rusty:suv']);
+  const HOLD_IDS = new Set(['fuelport']);
+  /** Clicking a parked car at Rusty's starts a minigame: jerrycan = siphon, empty hands = strip. */
+  const startHeist = (i: number, held: { k: string; d: number } | undefined) => {
+    const car = shared.rusty.cars[i];
+    if (!car) return;
+    const at = camera.getWorldPosition(new THREE.Vector3());
+    if (held?.k === 'jerrycan') {
+      if (car.gas <= 0) hud.toast('Bone dry. Somebody already got here.');
+      else if (held.d >= 5) hud.toast('Jerrycan is full');
+      else { heist.start('siphon', i, at); hud.toast('⛽ HOLD to suck… RELEASE when the gas hits the green band. Too long = mouthful.'); }
+    } else if (!held) {
+      if (car.parts <= 0) hud.toast('Nothing left but a shell.');
+      else { heist.start('strip', i, at, ['battery', 'cat', 'wheel'][3 - car.parts], i < 2); hud.toast('🔧 CLICK when the red needle is in the green — one per bolt. Miss = CLANG.'); }
+    } else hud.toast('Empty hands to strip it, or a jerrycan to siphon');
+  };
   const fireWorld = new THREE.Vector3();
   let lastGear = 0, lastHP = 100, fov = 75;
   const camRight = new THREE.Vector3();
@@ -225,7 +258,7 @@ async function start() {
       const o = hit.object;
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (!seen(o)) continue; // raycasts ignore .visible, so hidden things (Roscoe off-duty) must be skipped here
-      if (o.type === 'Sprite' || (mat && !Array.isArray(mat) && mat.transparent) || isDescendant(o, camera)) continue;
+      if (o.type === 'Sprite' || (mat && !Array.isArray(mat) && mat.transparent && !o.userData.iid) || isDescendant(o, camera)) continue;
       const id: string = o.userData.iid ?? '';
       if (!id) {
         const hull = isDescendant(o, rv.root);
@@ -249,7 +282,8 @@ async function start() {
         return { id: '', prompt: '', hull: false };
       }
       if (id.startsWith('rocks:')) return { id, hull: false, prompt: held ? 'Hands full — drop it first' : '🪨 Grab a rock (throw them at the cops from the rear window)' };
-      if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : 'ROSCOE: "Card, please." (bring the debit card)' };
+      if (id === 'bandit') return shared.bandits.phase === 2 ? { id, hull: false, prompt: held ? `Toss the bandits your ${itemName(held.k, held.d)} (fed bandits only take half)` : '🤠 "WHATCHA GOT FOR US?" (hand them food)' } : { id: '', prompt: '', hull: false };
+      if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : held ? `Offer Roscoe your ${itemName(held.k, held.d)} (bribe?)` : 'ROSCOE: "Card, please." (or try a cheeseburger)' };
       const prompt = id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
       return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
     }
@@ -292,20 +326,34 @@ async function start() {
     }
 
     // ---------- interaction ----------
-    const held = shared.items.find((i) => i.h === net.myId);
+    const mySlot = shared.crew[net.myId]?.slot ?? 0;
+    const held = shared.items.find((i) => i.h === net.myId && i.sl === mySlot);
     rockPiles.update(shared.rv.z);
+    mafiaView.update(shared);
     const look = lookAt(held);
     // a rock is always a throw (RMB), even while looking at something clickable like the rear window
     const rockThrow = held?.k === 'rock' && input.clicked(2);
     if (rockThrow) dropHeld(32);
+    // pistol: LMB fires along the crosshair (unless pointing at a shop/dealer prompt)
+    const gunShot = held?.k === 'pistol' && input.clicked(0) && !look.id.startsWith('rusty:');
+    if (gunShot) { const o = camera.getWorldPosition(new THREE.Vector3()), d = camera.getWorldDirection(new THREE.Vector3()); net.toHost({ t: 'shoot', o: [o.x, o.y, o.z], d: [d.x, d.y, d.z] }); }
     const holding = input.mouseDown(0) || (input.down('KeyE') && player.seat !== 'driver');
-    if (look.id && HOLD_IDS.has(look.id) && holding && !input.clicked(0) && !input.pressed('KeyE')) {
+    const holdable = HOLD_IDS.has(look.id);
+    const heistCar = /^rusty:(?:car(\d+)|suv)$/.exec(look.id);
+    const busy = heist.active;
+    if (busy) {
+      const res = heist.update(dt, input, camera.getWorldPosition(new THREE.Vector3()));
+      if (res === 'ok' || res === 'fail') act(`rusty:car${heist.car}:${res}`);
+    }
+    if (!busy && look.id && holdable && holding && !input.clicked(0) && !input.pressed('KeyE')) {
       if ((holdAcc += dt) >= 0.2) { holdAcc = 0; act(look.id); }
     } else holdAcc = 0;
-    if (look.id) {
+    if (busy) { /* minigame owns the mouse */ } else if (look.id) {
       // the driver's E is the upshift, so they interact with the mouse only
-      if ((input.pressed('KeyE') && player.seat !== 'driver') || input.clicked(0)) act(look.id, 0);
-      else if (input.clicked(2) && !rockThrow) act(look.id, 2);
+      if (gunShot) { /* fired */ } else if ((input.pressed('KeyE') && player.seat !== 'driver') || input.clicked(0)) {
+        if (heistCar) startHeist(heistCar[1] ? Number(heistCar[1]) : 1, held);
+        else act(look.id, 0);
+      } else if (input.clicked(2) && !rockThrow) act(look.id, 2);
     } else if (held) {
       if (held.k === 'extinguisher') {
         // hold LMB to spray; tell the host when the nozzle points at the fire
@@ -319,7 +367,7 @@ async function start() {
           act('spray', aimed ? 1 : 0);
         }
       } else if (held.k === 'map' && input.clicked(0)) mapView.toggle();
-      else if (input.clicked(0) && KINDS[held.k]?.food) act('self');
+      else if (input.clicked(0) && (KINDS[held.k]?.food || held.k === 'scratch')) act('self');
       if (input.clicked(2) && !rockThrow) dropHeld(7);
     }
     if (held && input.pressed('KeyG')) dropHeld(1.2);
@@ -341,6 +389,8 @@ async function start() {
     fx.update(dt, shared.cab.fire);
     rusty.update(dt, shared, rv.root.position, (id) => items.worldPosOf(id), (n) => sound.play(n));
     const siren = traffic.update(dt, shared, camera.getWorldPosition(new THREE.Vector3()), world.daylight);
+    vultures.update(dt, shared, rv.root.position);
+    canyonView.update(dt, shared);
 
     // dev: F9 teleports the RV to just before Rusty's Oasis
     if (DEV && host && input.pressed('F9')) {
@@ -363,7 +413,9 @@ async function start() {
     if (DEV && input.pressed('F8')) devJump(chapelZ() + 300, 'to the chapel');
     if (DEV && host && input.pressed('F7')) { host.s.weather.storm = 1; (host as any).stormLeft = 60; hud.toast('DEV: sandstorm'); }
     if (DEV && host && input.pressed('F6')) { host.s.clock = (22 - CFG.START_HOUR) * 3600; hud.toast('DEV: 22:00'); }
-    items.sync(shared.items, dt);
+    items.sync(shared.items, dt, shared.crew);
+    if (input.wheel) act(`slot:${input.wheel > 0 ? 1 : -1}`);
+    for (const [k, n] of [['Digit1', 0], ['Digit2', 1], ['Digit3', 2]] as const) if (input.pressed(k)) act(`slot:${(n - (shared.crew[net.myId]?.slot ?? 0) + 3) % 3}`);
 
     const camPos = camera.getWorldPosition(new THREE.Vector3());
     world.update(rv.root.position, camPos, CFG.START_HOUR + shared.clock / 3600, shared.weather.storm, shared.weather.wind, dt);
@@ -439,7 +491,14 @@ async function start() {
       renderer.setRenderTarget(null);
       sideGlass[i].visible = true;
     }
+    // free casino drinks: the world sways and smears
+    const drunk = shared.crew[net.myId]?.drunk ?? 0;
+    const tt = now / 1000;
+    const sway = drunk > 0 ? Math.min(1, drunk / 30) : 0;
+    if (sway > 0) camera.rotateZ(Math.sin(tt * 0.9) * 0.06 * sway);
+    canvas.style.filter = sway > 0 ? `blur(${(0.4 + 0.6 * Math.abs(Math.sin(tt * 0.7))) * sway}px) saturate(${1 + 0.4 * sway})` : '';
     renderer.render(scene, camera);
+    if (sway > 0) camera.rotateZ(-Math.sin(tt * 0.9) * 0.06 * sway);
     input.endFrame();
   };
 

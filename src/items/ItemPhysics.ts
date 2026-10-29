@@ -30,7 +30,7 @@ export class ItemSim {
   get(id: number) { return this.s.items.find((i) => i.id === id); }
 
   spawn(k: string, rv: boolean, x: number, y: number, z: number, slot = '', d?: number, price = 0): ItemState {
-    const it: ItemState = { id: this.nextId++, k, rv, x, y, z, ry: Math.random() * 6.28, h: -1, s: slot, d: d ?? KINDS[k]?.uses ?? 0, p: price };
+    const it: ItemState = { id: this.nextId++, k, rv, x, y, z, ry: Math.random() * 6.28, h: -1, sl: -1, s: slot, d: d ?? KINDS[k]?.uses ?? 0, p: price };
     if (slot) this.placeInSlot(it);
     this.s.items.push(it);
     this.vel.set(it.id, [0, 0, 0]);

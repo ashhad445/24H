@@ -4,7 +4,7 @@ import * as THREE from 'three';
 export interface ItemKind {
   name: string;
   r: number; // collision radius
-  food?: { hunger: number; stam: number; hypno?: number; caf?: number };
+  food?: { hunger: number; stam: number; hypno?: number; caf?: number; poison?: boolean };
   uses?: number; // starting uses for tools
 }
 
@@ -14,8 +14,8 @@ export const KINDS: Record<string, ItemKind> = {
   cheese: { name: 'Cheese slice', r: 0.05, food: { hunger: 4, stam: 2 } },
   burger: { name: 'Burger', r: 0.08, food: { hunger: 45, stam: 20 } },
   cheeseburger: { name: 'Cheeseburger', r: 0.08, food: { hunger: 60, stam: 25 } },
-  burntburger: { name: 'Burnt burger', r: 0.08, food: { hunger: 20, stam: 5 } },
-  rawburger: { name: 'Raw burger (gross)', r: 0.08, food: { hunger: 15, stam: -10 } },
+  burntburger: { name: 'Burnt burger', r: 0.08, food: { hunger: 20, stam: 5, poison: true } },
+  rawburger: { name: 'Raw burger (gross)', r: 0.08, food: { hunger: 15, stam: -10, poison: true } },
   coffee: { name: 'Coffee', r: 0.05, food: { hunger: 2, stam: 10, hypno: -1, caf: 150 } },
   energy: { name: 'Energy drink', r: 0.04, food: { hunger: 10, stam: 30, hypno: -0.6, caf: 60 } },
   soda: { name: 'Soda', r: 0.04, food: { hunger: 5, stam: 10 } },
@@ -34,6 +34,18 @@ export const KINDS: Record<string, ItemKind> = {
   ice: { name: 'Bag of ice', r: 0.1 },
   rock: { name: 'Rock', r: 0.07 },
   rocket: { name: 'Rocket fuel', r: 0.1 },
+  pistol: { name: 'Pistol', r: 0.08, uses: 12 },
+  weed: { name: 'THE STASH (wedding delivery)', r: 0.14 },
+  battery: { name: 'Car battery', r: 0.12 },
+  cat: { name: 'Catalytic converter', r: 0.12 },
+  wheel: { name: 'Stolen wheel', r: 0.2 },
+  // diner + casino
+  scorpion: { name: '4-lb SCORPION BURGER', r: 0.16, food: { hunger: 25, stam: 8 } }, // eaten in bites (diner challenge)
+  cocktail: { name: 'Free cocktail', r: 0.05, food: { hunger: 2, stam: 15 } }, // makes you drunk
+  cactus: { name: 'Potted cactus (prize)', r: 0.1 },
+  plush: { name: 'Stuffed scorpion', r: 0.1 },
+  fakecard: { name: 'Toy debit card', r: 0.03 },
+  dice: { name: 'Casino die', r: 0.035 },
 };
 
 export function itemName(k: string, d: number) {
@@ -262,9 +274,74 @@ export function buildItemMesh(k: string): THREE.Object3D {
       lab.position.y = 0.0; lab.rotation.y = Math.PI; g.add(lab);
       return g;
     }
+    case 'pistol': {
+      const g = new THREE.Group();
+      const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+      add(new THREE.BoxGeometry(0.035, 0.045, 0.2), mat('#2b2f33', { metalness: 0.7, roughness: 0.35 }), 0, 0.02, -0.02);
+      const grip = add(new THREE.BoxGeometry(0.032, 0.1, 0.045), mat('#3e2723'), 0, -0.04, 0.06); grip.rotation.x = 0.25;
+      add(new THREE.BoxGeometry(0.012, 0.02, 0.04), M.black, 0, -0.02, -0.0);
+      return g;
+    }
+    case 'weed': {
+      const g = new THREE.Group();
+      const add = (geo: THREE.BufferGeometry, m: THREE.Material, y: number) => { const o = new THREE.Mesh(geo, m); o.position.y = y; o.castShadow = true; g.add(o); return o; };
+      add(new THREE.BoxGeometry(0.34, 0.16, 0.22), mat('#2e7d32', { roughness: 0.9 }), 0);
+      add(new THREE.BoxGeometry(0.35, 0.03, 0.23), mat('#e8e8e0'), 0.04);
+      const leaf = add(new THREE.ConeGeometry(0.05, 0.12, 5), mat('#76ff03'), 0.13); leaf.scale.set(1, 1, 0.2);
+      return g;
+    }
+    case 'battery': {
+      const g = stack([[new THREE.BoxGeometry(0.24, 0.16, 0.14), mat('#263238'), 0], [new THREE.BoxGeometry(0.03, 0.03, 0.03), mat('#c62828'), 0.095], [new THREE.BoxGeometry(0.03, 0.03, 0.03), M.chrome, 0.095]]);
+      g.children[1].position.x = -0.07; g.children[2].position.x = 0.07;
+      return g;
+    }
+    case 'cat': return stack([[new THREE.CylinderGeometry(0.06, 0.06, 0.3, 12).rotateZ(Math.PI / 2), mat('#8d6e63', { metalness: 0.6, roughness: 0.5 }), 0]]);
+    case 'wheel': {
+      const g = new THREE.Group();
+      const t = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.07, 10, 20), mat('#1a1a1a', { roughness: 0.95 })); t.castShadow = true; g.add(t);
+      g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 14).rotateX(Math.PI / 2), M.chrome));
+      return g;
+    }
     case 'spare': {
       const g = stack([[cyl(0.42, 0.25, 20), M.black, 0], [cyl(0.24, 0.26, 10), M.chrome, 0]]);
       g.rotation.x = Math.PI / 2; const w = new THREE.Group(); w.add(g); return w;
+    }
+    case 'scorpion': {
+      // a cheeseburger the size of a hubcap, a toothpick flag, and a scorpion tail made of bacon
+      const g = buildItemMesh('cheeseburger'); g.scale.setScalar(2.3);
+      const w = new THREE.Group(); w.add(g);
+      const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.05), mat('#c62828', { side: THREE.DoubleSide })); flag.position.set(0.04, 0.2, 0); w.add(flag);
+      const pick = new THREE.Mesh(cyl(0.003, 0.18, 5), M.wood); pick.position.set(0, 0.13, 0); w.add(pick);
+      for (let i = 0; i < 5; i++) { const seg = new THREE.Mesh(new THREE.SphereGeometry(0.022 - i * 0.002, 8, 6), mat('#8d2c12')); seg.position.set(-0.1 - Math.sin(i * 0.5) * 0.04, 0.06 + i * 0.03, 0); w.add(seg); }
+      return w;
+    }
+    case 'cocktail': {
+      const g = new THREE.Group();
+      const glass = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.06, 14, 1, true).rotateX(Math.PI), mat('#e1f5fe', { transparent: true, opacity: 0.5 })); glass.position.y = 0.03; g.add(glass);
+      const drink = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.05, 14).rotateX(Math.PI), mat('#ff4081', { transparent: true, opacity: 0.85 })); drink.position.y = 0.028; g.add(drink);
+      const stem = new THREE.Mesh(cyl(0.004, 0.06, 6), mat('#e1f5fe')); stem.position.y = -0.03; g.add(stem);
+      const umb = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.015, 8), mat('#ffeb3b')); umb.position.set(0.02, 0.09, 0); g.add(umb);
+      return g;
+    }
+    case 'cactus': return stack([[cyl(0.06, 0.07, 12), mat('#bf6a3a'), 0], [new THREE.CapsuleGeometry(0.035, 0.12, 4, 8), mat('#5b8c3a'), 0.1]]);
+    case 'plush': {
+      const g = new THREE.Group(); const fur = mat('#d84315', { roughness: 1 });
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8).scale(1, 0.6, 1.4), fur); g.add(body);
+      for (let i = 0; i < 4; i++) { const seg = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), fur); seg.position.set(0, 0.03 + i * 0.03, 0.07 + Math.sin(i * 0.6) * 0.03); g.add(seg); }
+      for (const s of [-1, 1]) { const claw = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6).scale(1.4, 0.6, 1), fur); claw.position.set(s * 0.06, 0, -0.08); g.add(claw); }
+      return g;
+    }
+    case 'fakecard': {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.003, 0.054), mat('#ff80ab')); m.castShadow = true;
+      const g = new THREE.Group(); g.add(m);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.004, 0.01), mat('#ffeb3b')); stripe.position.z = -0.012; g.add(stripe);
+      return g;
+    }
+    case 'dice': {
+      const g = new THREE.Group();
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), mat('#c62828', { roughness: 0.3 })); cube.castShadow = true; g.add(cube);
+      for (const [x, y, z] of [[0, 0.031, 0], [0.031, 0.012, 0.012], [0.031, -0.012, -0.012], [0, 0, 0.031]]) { const pip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), M.white); pip.position.set(x, y, z); g.add(pip); }
+      return g;
     }
   }
   return new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), M.grey);
@@ -292,6 +369,6 @@ export const START_ITEMS: [string, number, number, number][] = [
   ['coffee', -0.8, 1.45, -0.2], ['energy', -1.0, 1.45, 0.1], ['soda', -0.75, 1.45, 0.3], ['soda', -1.1, 1.45, 0.45],
   // tools
   ['extinguisher', 1.22, 1.15, -0.7], ['hammer', -0.9, 1.1, 2.0], ['tape', -1.0, 1.1, 1.7], ['coolant', 0.9, 0.8, 2.9],
-  ['jerrycan', 0.35, 0.85, 3.0],
+  ['jerrycan', 0.35, 0.85, 3.0], ['jerrycan', 0.05, 0.85, 3.0],
   ['map', 0.75, 1.47, -2.85],
 ];

@@ -67,3 +67,26 @@ export function obbObb(
   }
   return true;
 }
+
+/**
+ * Like obbObb, but returns the contact: the axis of least overlap (unit, pointing from A to B)
+ * and how deep they overlap along it. null = no contact.
+ */
+export function obbMtv(
+  ax: number, az: number, ayaw: number, ahw: number, ahl: number,
+  bx: number, bz: number, byaw: number, bhw: number, bhl: number,
+): { nx: number; nz: number; depth: number } | null {
+  const A = [[Math.cos(ayaw), -Math.sin(ayaw)], [Math.sin(ayaw), Math.cos(ayaw)]];
+  const B = [[Math.cos(byaw), -Math.sin(byaw)], [Math.sin(byaw), Math.cos(byaw)]];
+  const dx = bx - ax, dz = bz - az;
+  let best: { nx: number; nz: number; depth: number } | null = null;
+  for (const [nx, nz] of [...A, ...B]) {
+    const rA = ahw * Math.abs(A[0][0] * nx + A[0][1] * nz) + ahl * Math.abs(A[1][0] * nx + A[1][1] * nz);
+    const rB = bhw * Math.abs(B[0][0] * nx + B[0][1] * nz) + bhl * Math.abs(B[1][0] * nx + B[1][1] * nz);
+    const d = dx * nx + dz * nz;
+    const depth = rA + rB - Math.abs(d);
+    if (depth <= 0) return null;
+    if (!best || depth < best.depth) best = d >= 0 ? { nx, nz, depth } : { nx: -nx, nz: -nz, depth };
+  }
+  return best;
+}

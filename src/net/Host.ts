@@ -1,17 +1,19 @@
 // Authoritative simulation. Runs only on the host; clients send intents.
-import { CFG, NOS, RADIO_STATIONS, RV, SURV } from '../config';
+import { CFG, HP, NOS, RADIO_STATIONS, RV, SURV } from '../config';
 import { ItemSim } from '../items/ItemPhysics';
 import { KINDS, START_ITEMS, itemName } from '../items/Items';
 import { newRVState, shift, stepRV, type RVAux } from '../rv/Drivetrain';
 import type { Box2 } from '../rv/RV';
 import { obbHitsBox, toSetLocal } from '../stops/geom';
+import { bonk, inRV, rvLocal } from '../stops/chase';
 import { PRICES, RUSTY_SET } from '../stops/rusty';
 import { RustySim, newRustyState, type StopHost } from '../stops/RustySim';
 import { NPC_DIMS, TrafficSim } from '../traffic/TrafficSim';
 import { StopsHost } from '../stops/Stops';
+import { CanyonSim } from '../world/Canyon';
 import { CHARM2_QUOTES, CHARM_QUOTES } from '../rv/charmQuotes';
 import { GROOM, Groom } from './Groom';
-import { LANE_OFFSET, PILE_ROCKS, baseX, chunkRocks, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
+import { LANE_OFFSET, PILE_ROCKS, ROAD_HALF, roadPoint, baseX, chunkRocks, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
 import { FORKS, branchAt, chapelZ, chosen, forkZ, routeOffset, setRouteChoices } from '../world/Route';
 import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
 
@@ -27,6 +29,7 @@ export class HostSim implements StopHost {
   readonly items: ItemSim;
   readonly rusty: RustySim;
   readonly traffic: TrafficSim;
+  readonly canyon: CanyonSim;
   readonly stops: StopsHost;
   private groom = new Groom((text) => this.emit({ t: 'ev', k: 'text', from: GROOM, text }));
   /** Every card transaction, for the end-of-run receipt. */
@@ -42,6 +45,7 @@ export class HostSim implements StopHost {
   private hornCd = 0;
   private hammerCd = new Map<number, number>();
   private warned = new Set<string>();
+  private lowHp = new Set<number>();
   /** Seconds of blowout immunity after a flat (so tires don't pop back-to-back). */
   private tireGrace = 60;
   /** Rocks left in each roadside pile (chunk index → count). */
@@ -60,25 +64,32 @@ export class HostSim implements StopHost {
       npcs: [],
       cop: { phase: 0, t: 0, fled: false },
       shark: { on: false, t: 0 },
+      mafia: { on: false, thugs: [] },
+      boulders: [],
+      bandits: { phase: 0, t: 0, near: 0, fed: false, couch: null },
       items: [],
       crew: {},
       money: CFG.START_MONEY,
       clock: 0,
       seats: { driver: -1, nav: -1 },
       heat: 0,
+      wanted: -1,
       phase: 'drive',
       ending: '',
     };
     this.items = new ItemSim(this.s, colliders);
     for (const [k, x, y, z] of START_ITEMS) {
       if (k === 'extinguisher') this.items.spawn(k, true, 0, 0, 0, 'wall');
+      else if (k === 'jerrycan') this.items.spawn(k, true, x, y, z).d = 5; // two full 5-gal cans
       else this.items.spawn(k, true, x, y, z);
     }
     this.items.spawn('spare', true, 0, 0, 0, 'rack');
+    this.items.spawn('weed', true, 0.6, 1.0, 1.4); // the whole point of the trip
     this.items.spawn('card', true, 0, 0, 0, 'tray');
     this.prevPose = { x: this.s.rv.x, z: this.s.rv.z, yaw: this.s.rv.yaw };
     this.rusty = new RustySim(this);
     this.traffic = new TrafficSim(this);
+    this.canyon = new CanyonSim(this);
     this.stops = new StopsHost(this, this.items.statics);
   }
 
@@ -111,6 +122,10 @@ export class HostSim implements StopHost {
     this.sfx('cash');
   }
 
+  /** A $0 line on the receipt (bribes and other crimes against dignity). */
+  log(from: number, what: string) { this.ledger.push({ who: from, what, amount: 0 }); }
+
+  fade(to: number, dur: number, ko = false) { this.emit(ko ? { t: 'ev', k: 'fade', to, dur, ko } : { t: 'ev', k: 'fade', to, dur }); }
   toast(text: string) { this.emit({ t: 'ev', k: 'toast', text }); }
   sfx(name: string, at?: [number, number, number]) { this.emit(at ? { t: 'ev', k: 'sfx', name, at } : { t: 'ev', k: 'sfx', name }); }
   private once(key: string, text: string) { if (!this.warned.has(key)) { this.warned.add(key); this.toast(text); } }
@@ -118,13 +133,29 @@ export class HostSim implements StopHost {
   names: (id: number) => string = (id) => `Bean ${id}`;
 
   crew(id: number): CrewState {
-    return (this.s.crew[id] ??= { hunger: 100, hypno: 0, caf: 0, spray: 0 });
+    return (this.s.crew[id] ??= { hunger: 100, hypno: 0, caf: 0, spray: 0, slot: 0, hp: 100, drunk: 0 });
   }
 
-  held(id: number) { return this.s.items.find((i) => i.h === id); }
+  held(id: number) { this.fixSlots(); const sl = this.s.crew[id]?.slot ?? 0; return this.s.items.find((i) => i.h === id && i.sl === sl); }
+
+  /** Keep every carried item in a unique pocket (0–2); released items clear theirs. */
+  private fixSlots() {
+    const used = new Map<number, Set<number>>();
+    for (const it of this.s.items) {
+      if (it.h < 0) { it.sl = -1; continue; }
+      const u = used.get(it.h) ?? new Set<number>(); used.set(it.h, u);
+      if (it.sl < 0 || it.sl > 2 || u.has(it.sl)) {
+        const pref = this.s.crew[it.h]?.slot ?? 0;
+        it.sl = !u.has(pref) ? pref : [0, 1, 2].find((n) => !u.has(n)) ?? pref;
+      }
+      u.add(it.sl);
+    }
+  }
 
   handle(from: number, m: GameMsg) {
     this.crew(from);
+    if (m.t === 'shoot') { this.shoot(from, m.o, m.d); return; }
+    if (m.t === 'act' && m.id.startsWith('slot:')) { const c = this.crew(from); c.slot = (c.slot + Number(m.id.slice(5)) + 3) % 3; return; }
     if (m.t === 'drive') {
       if (from === this.s.seats.driver) { this.drive = m.i; this.driveT = 0; }
     } else if (m.t === 'act') this.act(from, m.id, m.btn);
@@ -144,8 +175,7 @@ export class HostSim implements StopHost {
   /** Drop everything a departing player holds and remove their stats. */
   peerGone(id: number) {
     this.peerLeft(id);
-    const it = this.held(id);
-    if (it) { it.h = -1; it.rv = true; it.x = 0; it.y = 1.2; it.z = 0; }
+    for (const it of this.s.items) if (it.h === id) { it.h = -1; it.rv = true; it.x = 0; it.y = 1.2; it.z = 0; }
     delete this.s.crew[id];
   }
 
@@ -158,6 +188,7 @@ export class HostSim implements StopHost {
     if (id.startsWith('rocks:')) return this.rockPile(from, held, Number(id.slice(6)));
     if (this.rusty.act(from, id)) return;
     if (id === 'roscoe') return this.traffic.payTicket(from);
+    if (id === 'bandit') return this.traffic.feedBandits(from);
     if (this.stops.act(from, id)) return;
     if (id.startsWith('player:')) return this.playerAct(from, held, Number(id.slice(7)));
 
@@ -229,7 +260,7 @@ export class HostSim implements StopHost {
         break;
       case 'self':
         if (held && FOOD_KINDS.has(held.k)) this.feed(from, from, held);
-        else if (held?.k === 'patty') this.toast('Cook it first. Please.');
+        else if (held?.k === 'patty') this.eatPatty(from, held);
         else if (held?.k === 'scratch') this.scratch(from, held);
         break;
       case 'fuelport':
@@ -330,9 +361,67 @@ export class HostSim implements StopHost {
     }
   }
 
+  /** Pistol: a hitscan ray from the player's eye against cars and mafia thugs. */
+  private shoot(from: number, o: [number, number, number], d: [number, number, number]) {
+    const gun = this.held(from);
+    if (!gun || gun.k !== 'pistol') return;
+    if (gun.d <= 0) { this.toast('*click* — empty. Vinnie sells ammo behind Rusty\'s.'); this.sfx('click'); return; }
+    gun.d--; this.sfx('shot', o);
+    const len = Math.hypot(...d) || 1, dx = d[0] / len, dy = d[1] / len, dz = d[2] / len;
+    let best: { t: number; hit: () => void } | null = null;
+    const test = (cx: number, cy: number, cz: number, r: number, hit: () => void) => {
+      const vx = cx - o[0], vy = cy - o[1], vz = cz - o[2], t = vx * dx + vy * dy + vz * dz;
+      if (t < 0 || t > 170 || (best && t > best.t)) return;
+      if (vx * vx + vy * vy + vz * vz - t * t <= r * r) best = { t, hit };
+    };
+    for (const n of this.s.npcs) if (n.w <= 0) test(n.x, 1.0, n.z, NPC_DIMS[n.k][1] * 0.55 + 0.8, () => this.traffic.shootCar(n));
+    for (const th of this.s.mafia.thugs) if (th.hp > 0) test(th.x, 1.0, th.z, 0.65, () => this.hitThug(th));
+    (best as { hit: () => void } | null)?.hit();
+  }
+
+  private hitThug(th: { hp: number; x: number; z: number }) {
+    th.hp--; this.sfx('crunch', [th.x, 1, th.z]);
+    if (th.hp > 0) return;
+    const left = this.s.mafia.thugs.filter((t) => t.hp > 0).length;
+    this.toast(left ? `💀 One of the Bonetti goons drops. ${left} left.` : '💀 The last goon falls.');
+    if (!left && this.s.mafia.on) {
+      this.s.phase = 'ended';
+      this.s.ending = '🔫 SHOWDOWN WON — the Bonetti crew is dead in the sand. The wedding goes on (nobody mentions the bodies).';
+    }
+  }
+
+  private thugT = 0;
+  private thugsSpawned = false;
+  /** Late = the mafia hunts you; its goons wait at the chapel and shoot at the RV. */
+  private stepMafia(dt: number) {
+    const s = this.s, m = s.mafia, rv = s.rv;
+    if (!m.on) return;
+    const cz = chapelZ();
+    if (!this.thugsSpawned && rv.z - cz < 900) {
+      this.thugsSpawned = true;
+      for (let i = 0; i < 6; i++) {
+        const side = i % 2 ? 1 : -1;
+        const [x, z] = roadPoint(cz + 25 + Math.floor(i / 2) * 14, side * (ROAD_HALF + 5 + (i % 3) * 2));
+        m.thugs.push({ id: i + 1, x, z, hp: 2 });
+      }
+      this.toast('🕴️ The Bonetti crew is waiting at the chapel. Bring a gun… or a very good excuse.');
+    }
+    this.thugT -= dt;
+    if (this.thugT > 0) return;
+    this.thugT = 1.4 + Math.random();
+    for (const th of m.thugs) {
+      if (th.hp <= 0 || Math.hypot(th.x - rv.x, th.z - rv.z) > 95) continue;
+      if (Math.random() < 0.6) {
+        rv.integrity = Math.max(0, rv.integrity - 1.6); this.joltAll(0.25); this.sfx('shot', [th.x, 1.4, th.z]);
+        if (Math.random() < 0.25) this.sfx('crunch', [rv.x, 1, rv.z]);
+      } else this.sfx('shot', [th.x, 1.4, th.z]);
+    }
+  }
+
   private itemAct(from: number, held: ItemState | undefined, targetId: number) {
     const target = this.items.get(targetId);
     if (!target || target.h !== -1) return;
+    if (this.s.items.filter((i) => i.h === from).length >= 3) { this.toast('Pockets full (3 slots) — drop something'); return; }
     if (!held) {
       target.h = from; target.s = '';
       this.sfx('grab');
@@ -368,10 +457,20 @@ export class HostSim implements StopHost {
     }
   }
 
+  /** Consuming store stock you never paid for: whichever clerk saw it reacts. */
+  private eatUnpaid(from: number, it: ItemState) {
+    if (it.p <= 0) return;
+    it.p = 0;
+    if (!this.rusty.unpaid(from)) this.stops.unpaid(from);
+  }
+
   private feed(from: number, to: number, it: ItemState) {
+    if (this.stops.eat(from, it)) return; // e.g. the Scorpion Challenge burger
+    this.eatUnpaid(from, it);
     const food = KINDS[it.k].food!;
     const c = this.crew(to);
     c.hunger = Math.min(100, c.hunger + food.hunger);
+    if (it.k === 'cocktail') { c.drunk = Math.min(240, (c.drunk ?? 0) + 120); this.toast(`🍹 ${this.name(to)} is feeling GREAT. Maybe don't drive for a bit.`); }
     if (food.hypno) c.hypno = Math.max(0, c.hypno + food.hypno);
     if (food.caf) c.caf = Math.max(c.caf, food.caf);
     this.items.remove(it.id);
@@ -380,15 +479,73 @@ export class HostSim implements StopHost {
     this.sfx('eat');
     const what = itemName(it.k, it.d);
     this.toast(from === to ? `${this.name(from)} ate a ${what}` : `${this.name(from)} fed ${this.name(to)} a ${what}`);
+    if (food.poison) this.poison(to);
+  }
+
+  /** Eating a bare patty. Cooked is fine (if sad); raw or burnt is a mistake. */
+  private eatPatty(from: number, it: ItemState) {
+    this.eatUnpaid(from, it);
+    const bad = it.d < 1 || it.d > 1.35;
+    const c = this.crew(from);
+    c.hunger = Math.min(100, c.hunger + 25);
+    this.items.remove(it.id);
+    this.emit({ t: 'ev', k: 'emote', who: from, what: 'eat' });
+    this.sfx('eat');
+    this.toast(bad ? `${this.name(from)} ate a ${it.d < 1 ? 'RAW' : 'charcoal'} patty with their bare hands. Bold.` : `${this.name(from)} ate a plain patty. Sad, but food.`);
+    if (bad) this.poison(from);
+  }
+
+  /** Food poisoning: lose health, puke, drop what you're holding. */
+  poison(id: number) {
+    this.hurt(id, HP.POISON);
+    const p = this.handOf(id);
+    this.emit({ t: 'ev', k: 'puke', to: id });
+    this.sfx('puke', p ?? undefined);
+    const held = this.held(id);
+    if (held) {
+      held.h = -1;
+      if (p && !inRV(this.s, p)) { held.rv = false; held.x = p[0]; held.y = Math.max(0.3, p[1] - 0.4); held.z = p[2]; }
+      else { const [lx, lz] = p ? rvLocal(this.s, p[0], p[2]) : [0, 0]; held.rv = true; held.x = lx; held.y = 1.0; held.z = lz; }
+    }
+    const lines = ['🤮 BLEEEGH. Somebody get the mop.', '🤮 That came back up. All of it.', '🤮 The RV smells different now. Worse.', '🤮 Food poisoning! −15 health.'];
+    this.toast(lines[Math.floor(Math.random() * lines.length)]);
   }
 
   private scratch(from: number, it: ItemState) {
+    this.eatUnpaid(from, it);
     this.items.remove(it.id);
     const roll = Math.random();
     const win = roll < 0.05 ? 50 : roll < 0.25 ? 10 : 0;
     this.sfx('scrub');
     if (win) { this.credit(from, win, 'Scratch-off win'); this.toast(`🎟️ ${this.name(from)} scratched a WINNER: +$${win}!`); }
     else this.toast(`🎟️ ${this.name(from)} scratched… nothing. "Better luck next time"`);
+  }
+
+  /** Lose health. Hitting 0 passes you out (next crew tick). */
+  hurt(id: number, amount: number) {
+    const c = this.crew(id);
+    c.hp = Math.max(0, c.hp - amount);
+  }
+
+  /** Standing passengers get thrown around in a crash. */
+  hurtStanding(mag: number) {
+    const s = this.s;
+    for (const id of Object.keys(s.crew).map(Number)) {
+      if (id === s.seats.driver || id === s.seats.nav) continue;
+      const p = this.handOf(id);
+      if (p && !inRV(s, p)) continue; // outside, not in the cabin
+      this.hurt(id, mag * HP.CRASH);
+    }
+  }
+
+  /** 0 hp: blackout, drop everything, wake up on the RV floor with an urgent-care bill. */
+  private passOut(id: number) {
+    const c = this.crew(id);
+    bonk(this, id, HP.KO_SEC);
+    c.hp = HP.WAKE_HP;
+    this.emit({ t: 'ev', k: 'wake', to: id });
+    this.charge(id, HP.ER_BILL, 'Desert Urgent Care');
+    this.toast(`🚑 ${this.name(id)} PASSED OUT. The crew dragged them back in by the ankles. Desert Urgent Care billed $${HP.ER_BILL} anyway.`);
   }
 
   private useUp(it: ItemState) {
@@ -475,18 +632,30 @@ export class HostSim implements StopHost {
     this.crashCd = Math.max(0, this.crashCd - dt);
     // RV footprint: center between nose and rear, in RV-local z
     const midZ = (RV.noseZ + RV.zRear) / 2, hl = (RV.zRear - RV.noseZ) / 2;
-    for (const set of [RUSTY_SET, ...this.stops.sets()]) {
-      if (Math.abs(rv.x - set.x) > 150 || Math.abs(rv.z - set.z) > 150) continue;
-      const c = Math.cos(rv.yaw), sn = Math.sin(rv.yaw);
-      const [cx, cz] = toSetLocal(set, rv.x + midZ * sn, rv.z + midZ * c);
-      const yaw = rv.yaw - set.yaw;
-      if (set.boxes.some((b) => obbHitsBox(cx, cz, yaw, RV.halfW, hl, b))) {
-        // undo the move and bounce
-        const sp = Math.abs(rv.speed);
-        rv.x = this.prevPose.x; rv.z = this.prevPose.z; rv.yaw = this.prevPose.yaw;
-        rv.speed *= -0.15;
-        if (sp > 2 && this.crashCd <= 0) { this.crashCd = 0.6; this.sfx('bang'); this.joltAll(Math.min(1.5, sp / 12)); this.toast('💥 CRUNCH'); }
-        return;
+    const sets = [RUSTY_SET, ...this.stops.sets()].filter((set) => Math.abs(rv.x - set.x) < 150 && Math.abs(rv.z - set.z) < 150);
+    const blocked = (x: number, z: number, yaw: number) => {
+      const c = Math.cos(yaw), sn = Math.sin(yaw);
+      return sets.some((set) => {
+        const [cx, cz] = toSetLocal(set, x + midZ * sn, z + midZ * c);
+        return set.boxes.some((b) => obbHitsBox(cx, cz, yaw - set.yaw, RV.halfW, hl, b));
+      });
+    };
+    if (sets.length && blocked(rv.x, rv.z, rv.yaw)) {
+      // slide along the wall: keep whichever axis of the move still fits, lose the part that went into the wall
+      const p = this.prevPose, dx = rv.x - p.x, dz = rv.z - p.z, moved = Math.hypot(dx, dz) || 1;
+      const sp = Math.abs(rv.speed);
+      const tries: [number, number, number][] = [[p.x + dx, p.z, rv.yaw], [p.x, p.z + dz, rv.yaw], [p.x + dx, p.z, p.yaw], [p.x, p.z + dz, p.yaw]];
+      const ok = tries.find(([x, z, yw]) => !blocked(x, z, yw));
+      let kept = 0;
+      if (ok) { kept = Math.hypot(ok[0] - p.x, ok[1] - p.z) / moved; rv.x = ok[0]; rv.z = ok[1]; rv.yaw = ok[2]; }
+      else { rv.x = p.x; rv.z = p.z; rv.yaw = p.yaw; }
+      const lost = sp * (1 - kept);
+      rv.speed = ok ? rv.speed * Math.max(0.3, kept) : rv.speed * -0.15;
+      if (lost > 2 && this.crashCd <= 0) {
+        this.crashCd = 0.6; this.sfx('bang');
+        const mag = Math.min(1.5, lost / 12);
+        this.joltAll(mag); this.hurtStanding(mag);
+        this.toast(kept > 0.3 ? '💥 SCRAAAPE along the wall' : '💥 CRUNCH');
       }
     }
     this.prevPose = { x: rv.x, z: rv.z, yaw: rv.yaw };
@@ -511,6 +680,7 @@ export class HostSim implements StopHost {
         const k = (dc.hypno - 0.4) / 0.6;
         input.st += (Math.sin(this.t * 0.9) * 0.45 + Math.sin(this.t * 2.7) * 0.2) * k;
       }
+      if ((dc.drunk ?? 0) > 0) input.st += Math.sin(this.t * 1.3) * 0.22 + Math.sin(this.t * 3.7) * 0.08; // free casino drinks
       if (dc.hypno >= 1) { input.st = Math.sin(this.t * 0.5) * 0.6; input.br = 0; this.once('asleep' + Math.floor(this.t / 30), `😴 ${this.name(s.seats.driver)} fell asleep at the wheel! Slap them / honk / coffee`); }
     }
     if (rv.horn && !this.hornWas) this.honked();
@@ -563,10 +733,12 @@ export class HostSim implements StopHost {
     this.collideStatics(dt);
 
     // ---------- props ----------
+    this.fixSlots();
     this.items.step(dt, accel);
     this.stepRocks(dt);
     this.rusty.step(dt);
     this.traffic.step(dt);
+    this.canyon.step(dt);
     this.stops.step(dt);
     this.groom.step(s, dt);
 
@@ -597,22 +769,39 @@ export class HostSim implements StopHost {
       if (before >= SURV.HANGRY_BELOW && c.hunger < SURV.HANGRY_BELOW) this.toast(`😠 ${this.name(id)} is getting hangry`);
       c.caf = Math.max(0, c.caf - dt);
       c.spray = Math.max(0, c.spray - dt);
+      c.drunk = Math.max(0, (c.drunk ?? 0) - dt);
+      // health: starving slowly eats you; a full belly patches you up
+      c.hp ??= 100;
+      if (c.hunger <= 0) c.hp -= HP.EMPTY * dt * solo;
+      else if (c.hunger < HP.STARVING_BELOW) c.hp -= HP.STARVING * dt * solo;
+      else if (c.hunger > HP.REGEN_ABOVE) c.hp = Math.min(100, c.hp + HP.REGEN * dt);
+      if (c.hp < 25 && !this.lowHp.has(id)) { this.lowHp.add(id); this.toast(`🦅 ${this.name(id)} looks rough. Vultures are circling. EAT SOMETHING.`); }
+      else if (c.hp > 30) this.lowHp.delete(id);
+      if (c.hp <= 0) this.passOut(id);
       if (id === s.seats.driver && Math.abs(rv.speed) > SURV.HYPNO_MIN_SPEED && c.caf <= 0) c.hypno = Math.min(1, c.hypno + (dt / SURV.HYPNO_TIME) * solo);
       else if (id !== s.seats.driver) c.hypno = Math.max(0, c.hypno - dt / 20);
     }
 
     // ---------- clock & endings ----------
     s.clock += dt * CFG.TIME_SCALE;
+    this.once('plot', '🌿 THE JOB: get the stash to Kevin\'s wedding before 24:00. Miss it and the Bonetti mafia — who paid for it — comes for you.');
+    this.stepMafia(dt);
     if (rv.integrity <= 0) { s.phase = 'ended'; s.ending = 'TOTALED — the RV fell apart in the desert.'; }
-    if (s.clock >= CFG.RUN_HOURS * 3600) { s.phase = 'ended'; s.ending = 'MISSED IT — the wedding happened without you.'; }
+    if (s.clock >= CFG.RUN_HOURS * 3600 && !s.mafia.on) {
+      s.mafia.on = true;
+      this.toast('⏰ TIME\'S UP. The Bonetti crew has your location. Guns up — or deliver late and pray.');
+    }
     if (rv.z < chapelZ()) {
       // drove through the wedding arch
       s.phase = 'ended';
       const left = CFG.RUN_HOURS * 3600 - s.clock;
       const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60);
-      s.ending = s.money >= CFG.WEDDING_MIN_BALANCE
-        ? `💒 JUST MARRIED — you made it with ${h}h ${m}m to spare and $${s.money.toFixed(2)} for the gift!`
-        : `💸 EMPTY-HANDED — you made it with ${h}h ${m}m to spare… and $${s.money.toFixed(2)}. Awkward.`;
+      const stash = s.items.some((i) => { const w = i.k === 'weed' && this.itemWorld(i); return !!w && Math.hypot(w[0] - rv.x, w[2] - rv.z) < 25; });
+      s.ending = !stash
+        ? '🚫 NO STASH — you drove through the arch with nothing. Kevin has never been so sober, or so angry.'
+        : left >= 0
+          ? `💒 DELIVERED — the stash reached the wedding with ${h}h ${m}m to spare. The toast was... lit. $${s.money.toFixed(2)} left on the card.`
+          : '🌿 DELIVERED LATE — the stash arrived, the mafia did not get you. Kevin cries a little.';
     }
   }
 }

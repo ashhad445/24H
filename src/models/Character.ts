@@ -2,9 +2,13 @@
 // One builder, many looks. Everything faces −Z. Animation is procedural: walk cycle, sitting,
 // holding, eating, slapping, blinking, talking mouth, breathing, and a few NPC idle poses.
 import * as THREE from 'three';
+import { Assets, tint } from '../core/AssetLoader';
 
 export type Hat = 'none' | 'cap' | 'cowboy' | 'sheriff' | 'beanie' | 'bucket' | 'trucker' | 'party' | 'beehive' | 'hardhat';
-export type Pose = 'idle' | 'read' | 'cross' | 'wipe' | 'hips' | 'notepad' | 'wave';
+export type Pose = 'idle' | 'read' | 'cross' | 'wipe' | 'hips' | 'notepad' | 'wave'
+  // seated extras (place the root ~0.35 m below the seat height for humans)
+  | 'sit' | 'eat' | 'sleep' | 'kick' | 'slots' | 'sing';
+const SEATED_POSES = new Set<Pose>(['sit', 'eat', 'sleep', 'kick', 'slots']);
 
 export interface CharOpts {
   kind: 'bean' | 'human';
@@ -42,6 +46,9 @@ const GOLD = mat('#d4a017', 0.3, { metalness: 0.8 });
 function mesh(g: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0, shadow = true) {
   const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.castShadow = shadow; return o;
 }
+
+// ---- Blender kit (public/models/people.glb, built by art/people.py) ----
+const GLB_HATS: Partial<Record<Hat, string>> = { cowboy: 'hat_cowboy', sheriff: 'hat_sheriff', cap: 'hat_cap', trucker: 'hat_trucker', hardhat: 'hat_hardhat', beehive: 'hat_beehive' };
 
 /** A hat whose band sits at y=0 and fits a head of radius r. */
 function buildHat(type: Hat, color: string, r: number): THREE.Group {
@@ -134,6 +141,7 @@ export class Character {
 
   constructor(readonly o: CharOpts) {
     this.pose = o.pose ?? 'idle';
+    if (SEATED_POSES.has(this.pose)) this.anim.seated = true;
     const bean = o.kind === 'bean';
     const skin = o.skin ?? '#e0ac69';
     const bodyM = mat(o.body, bean ? 0.55 : 0.8);
@@ -204,6 +212,7 @@ export class Character {
       const white = mesh(new THREE.SphereGeometry(r, 12, 10), WHITE, 0, 0, 0, false); white.scale.z = 0.6; e.add(white);
       e.add(mesh(new THREE.SphereGeometry(r * 0.5, 10, 8), DARK, 0, -r * 0.05, -r * 0.45, false));
       e.add(mesh(new THREE.SphereGeometry(r * 0.16, 6, 4), WHITE, r * 0.18, r * 0.2, -r * 0.75, false)); // glint
+      e.userData.face = true;
       this.head.add(e); this.eyes.push(e);
       if (bean) { const cheek = mesh(new THREE.SphereGeometry(0.045, 8, 6), mat('#ff8a80', 0.8), s * 0.19, faceY - 0.06, ez + 0.06, false); cheek.scale.z = 0.4; this.head.add(cheek); }
     }
@@ -213,12 +222,14 @@ export class Character {
     this.smile.rotation.z = Math.PI; this.head.add(this.smile);
     this.mouth = mesh(new THREE.SphereGeometry(bean ? 0.05 : 0.04, 10, 8), mat('#5d1a1a', 0.6), 0, my, mz, false);
     this.mouth.scale.set(1.3, 0.2, 0.4); this.mouth.visible = false; this.head.add(this.mouth);
+    this.smile.userData.face = this.mouth.userData.face = true;
 
     if (o.shades) {
       const sh = mesh(new THREE.BoxGeometry(faceR * 1.55, faceR * 0.28, 0.04), mat('#111', 0.15, { metalness: 0.6 }), 0, faceY + 0.04, ez - 0.03, false);
+      sh.userData.face = true;
       this.head.add(sh); this.eyes.forEach((e) => (e.visible = false));
     }
-    if (o.glasses) for (const s of [-1, 1]) this.head.add(mesh(new THREE.TorusGeometry(bean ? 0.085 : 0.055, 0.008, 6, 16), DARK, s * (bean ? 0.11 : 0.075), faceY + 0.04, ez - 0.03, false));
+    if (o.glasses) for (const s of [-1, 1]) { const gl = mesh(new THREE.TorusGeometry(bean ? 0.085 : 0.055, 0.008, 6, 16), DARK, s * (bean ? 0.11 : 0.075), faceY + 0.04, ez - 0.03, false); gl.userData.face = true; this.head.add(gl); }
     if (o.mustache) for (const s of [-1, 1]) {
       const m = mesh(new THREE.CapsuleGeometry(0.022, 0.07, 4, 8), mat(o.mustache, 0.9), s * 0.045, my + 0.05, mz - 0.01, false);
       m.rotation.z = s * 1.2; this.head.add(m);
@@ -241,7 +252,55 @@ export class Character {
 
     this.root.scale.setScalar(o.height ?? 1);
     if (o.npc) Character.all.add(this);
+    // humans swap their primitive body for the Blender kit as soon as it's loaded
+    if (!bean) Assets.onReady(() => this.useKit());
   }
+
+  /** Replace the primitive human body/head/arms/hat with people.glb parts (face features stay). */
+  private useKit() {
+    if (!Assets.has('people') || this.kit) return;
+    const P = (n: string) => Assets.node('people', n);
+    if (!P('torso') || !P('head')) return;
+    this.kit = true;
+    const o = this.o, bel = o.belly ?? 1;
+    const colors: Record<string, string | undefined> = {
+      skin: o.skin ?? '#e0ac69', shirt: o.body, pants: o.pants ?? '#3e4a5a', shoes: o.shoes ?? '#3e2723',
+      hair: o.hair || '#5d4037', beard: o.beard ?? o.mustache ?? '#eeeeee', brow: o.hair || o.beard || o.mustache || '#4e342e',
+      hat: o.hatColor ?? '#c62828', vest: o.vest, apron: o.apron, tie: o.tie,
+    };
+    const K = (n: string) => { const x = P(n); return x ? tint(x, colors) : null; };
+    // drop the primitives (keep face features and anything held in the hands)
+    const old: THREE.Object3D[] = [];
+    const walk = (g: THREE.Object3D) => {
+      for (const c of g.children) {
+        if (c.userData.face || c === this.hand || c === this.handL) continue;
+        if (c === this.head || c === this.armL || c === this.armR || c === this.legL || c === this.legR || c === this.body) walk(c);
+        else old.push(c);
+      }
+    };
+    walk(this.root);
+    old.forEach((c) => c.removeFromParent());
+
+    const body = (x: THREE.Object3D | null, sx = bel, sz = bel * 0.9) => { if (x) { x.scale.set(sx, 1, sz); this.body.add(x); } return x; };
+    this.torso = body(K('torso'))!;
+    if (bel > 1.1) { const g = body(K('gut'), 0.55 + bel * 0.4, 0.45 + bel * 0.4); if (g) { g.scale.y = 1 + (bel - 1) * 0.3; g.position.y = 1.02 * (1 - g.scale.y); } }
+    if (o.vest) body(K('vest'));
+    if (o.apron) body(K('apron'));
+    if (o.tie) body(K('tie'));
+    if (o.badge) body(K('badge'));
+    for (const [leg, n] of [[this.legL, 'legL'], [this.legR, 'legR']] as const) { const x = K(n); if (x) leg.add(x); }
+    for (const [arm, n] of [[this.armL, 'armL'], [this.armR, 'armR']] as const) { const x = K(n); if (x) arm.add(x); }
+    this.head.add(K('head')!);
+    const top = (n: string) => { const x = K(n); if (x) { x.position.y = 0.36; this.head.add(x); } return x; };
+    if (o.hair) top('hair_0');
+    if (o.beard) top('beard_0');
+    if (o.mustache) top('mustache_0');
+    if (o.hat && o.hat !== 'none') {
+      const hat = GLB_HATS[o.hat] ? K(GLB_HATS[o.hat]!) : buildHat(o.hat, o.hatColor ?? '#c62828', 0.22 * 1.05);
+      if (hat) { hat.position.y = 0.36; hat.rotation.x = -0.05; this.head.add(hat); }
+    }
+  }
+  private kit = false;
 
   eat() { this.eatT = 1.3; }
   slap() { this.slapT = 0.45; }
@@ -304,6 +363,13 @@ export class Character {
     }
     if (a.hold) { rx = 1.25 + a.aim * 0.8; rz = 0; }
     if (a.seated && !a.hold) { lx = rx = 0.9; lz = 0.1; rz = -0.1; } // hands on the lap / wheel
+    switch (this.pose) {
+      case 'eat': if (this.eatT <= 0 && Math.sin(t * 0.7) > 0.97) this.eatT = 1.3; break;
+      case 'sleep': lx = rx = 1.4; lz = 0.4; rz = -0.4; this.body.rotation.x = lerp(this.body.rotation.x, -0.55, 3); this.head.rotation.x = 0.5; break;
+      case 'kick': this.legL.rotation.x = Math.PI / 2 + Math.sin(t * 7) * 0.45; this.legR.rotation.x = Math.PI / 2 + Math.sin(t * 7 + 2) * 0.35; break;
+      case 'slots': rx = 1.2 + Math.max(0, Math.sin(t * 1.4)) * 0.9; rz = -0.3; lx = 0.9; break;
+      case 'sing': lx = 2.4; lz = 0.2; rx = Math.PI * 0.8; rz = 0.4 + Math.sin(t * 3) * 0.4; this.body.rotation.z = Math.sin(t * 4) * 0.08; a.talk = 0.7; break;
+    }
     if (this.eatT > 0) {
       this.eatT -= dt;
       rx = 2.5; rz = -0.55; // hand to mouth

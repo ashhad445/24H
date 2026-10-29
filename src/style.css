@@ -67,6 +67,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1210; fon
 
 /* damage flash + speed vignette */
 #fx-hurt { position: fixed; inset: 0; pointer-events: none; z-index: 4; opacity: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(200, 20, 10, .75) 100%); }
+#fx-black { position: fixed; inset: 0; pointer-events: none; z-index: 9; opacity: 0; background: #000; }
 #fx-flash { position: fixed; inset: 0; pointer-events: none; z-index: 6; opacity: 0; background: #fff; }
 #fx-nos { position: fixed; inset: 0; pointer-events: none; z-index: 3; opacity: 0; background: radial-gradient(ellipse at center, transparent 35%, rgba(41, 121, 255, .55) 100%); }
 #cam-warn { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: rgba(255, 214, 0, .92); color: #111; font-weight: 800; font-size: 15px; padding: 6px 16px; border-radius: 10px; border: 2px solid #111; white-space: nowrap; }
@@ -100,6 +101,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1210; fon
 #vitals .bar i { flex: 1; height: 8px; background: rgba(255,255,255,.15); border-radius: 4px; overflow: hidden; }
 #vitals .bar b { display: block; height: 100%; width: 50%; background: var(--orange); border-radius: 4px; transition: width .2s; }
 #v-hunger.low { background: #ff5252; }
+#v-hp { background: #e53935 !important; }
+#v-hp.low { animation: hpPulse .6s infinite alternate; }
+@keyframes hpPulse { from { opacity: 1; } to { opacity: .35; } }
+#fx-puke { position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: 0; background: radial-gradient(ellipse at center, rgba(120, 200, 40, .25) 30%, rgba(90, 160, 20, .8) 100%); }
 #v-awake { background: #80deea; }
 #v-held { margin-top: 5px; font-weight: 600; color: #ffe0b2; min-height: 16px; }
 #fx-smoke { position: fixed; inset: 0; background: #5b5650; opacity: 0; pointer-events: none; z-index: 4; transition: opacity .4s; }

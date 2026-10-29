@@ -25,7 +25,7 @@ export class ItemViews {
     return v && v.parent ? v.obj.getWorldPosition(new THREE.Vector3()) : null;
   }
 
-  sync(items: ItemState[], dt: number) {
+  sync(items: ItemState[], dt: number, slots: Record<number, { slot: number }> = {}) {
     const seen = new Set<number>();
     for (const it of items) {
       seen.add(it.id);
@@ -40,6 +40,7 @@ export class ItemViews {
         this.views.set(it.id, v);
       }
 
+      v.obj.visible = it.h === -1 || it.sl === (slots[it.h]?.slot ?? 0);
       // pick the parent
       let parent: THREE.Object3D | null;
       if (it.h === this.myId) parent = this.camera;
