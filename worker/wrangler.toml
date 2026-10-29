@@ -1,0 +1,23 @@
+name = "roadtrip-relay"
+main = "relay.ts"
+compatibility_date = "2025-01-01"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
+
+# the built client; run the Worker first so WebSocket upgrades on "/" reach the relay
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+run_worker_first = true
+
+# the built client; run the Worker first so WebSocket upgrades on "/" reach the relay
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+run_worker_first = true

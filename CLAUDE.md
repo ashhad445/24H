@@ -198,6 +198,7 @@ Procedural Web Audio (engine, road, ambience, SFX) + procedural radio stations (
 ## 18b. Hosting
 - **Production = one Node service**: `npm run build` then `npm start`. `server/relay.ts` serves `dist/` over HTTP and the WebSocket relay on the same port (`PORT` env). The lobby auto-targets `wss://<same host>`; on Vite dev (:3000) it targets `ws://host:3001`.
 - **Render**: `render.yaml` blueprint (free plan sleeps after ~15 min idle → ~50 s cold start). Railway / Fly.io work the same way (build + start command, needs WebSocket support). Static-only hosts (Netlify, GitHub Pages, itch.io) can serve the client, but the relay must run somewhere that supports WebSockets.
+- **Cloudflare (free, no card)**: `worker/relay.ts` is the same relay as a Durable Object (`wrangler.toml`). `npx wrangler login`, `npm run deploy:relay` (prints the `*.workers.dev` URL), then build the client with `VITE_RELAY_URL=wss://<that host>` and `npm run deploy:client` (Pages). Local test: `npm run relay:worker` + `npx tsx scripts/test-worker.ts`.
 - Health check: `GET /health`. Server pings sockets every 25 s so proxies don't drop idle connections.
 
 ## 19. Win / Lose & Meta

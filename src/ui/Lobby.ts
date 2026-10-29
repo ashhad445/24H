@@ -14,9 +14,13 @@ export function runLobby(): Promise<Net> {
   try { name.value = localStorage.getItem('rr-name') ?? ''; } catch { /* storage blocked */ }
   if (!name.value) name.value = `Bean${Math.floor(Math.random() * 900 + 100)}`;
   // dev (Vite on :3000) → separate relay on :3001; deployed → relay is the same server that served the page
-  server.value = location.port === '3000'
-    ? `ws://${location.hostname || 'localhost'}:${CFG.RELAY_PORT}`
-    : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+  // VITE_RELAY_URL (build time) points a static deploy (Cloudflare Pages) at a separate relay Worker
+  const relayUrl = (import.meta as any).env?.VITE_RELAY_URL as string | undefined;
+  server.value = relayUrl
+    ? relayUrl
+    : location.port === '3000'
+      ? `ws://${location.hostname || 'localhost'}:${CFG.RELAY_PORT}`
+      : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
   const params = new URLSearchParams(location.search);
   if (params.get('room')) code.value = params.get('room')!.toUpperCase();
 
