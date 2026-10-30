@@ -6,7 +6,7 @@
 #   plinth    1 m long base strip                                 corner    0.42 square pilaster, 1 m tall (scale y)
 #   pipe      drain pipe 1 m tall (scale y)                       ac / vent / sconce / sat  roof + wall clutter
 # Materials tint_trim / tint_awning / tint_accent are recolored per building in code.
-exec(open(r'E:\24H\art\lib.py').read())
+import os; exec(open(os.path.join(os.environ.get('ART_DIR', r'E:\24H\art'), 'lib.py')).read())
 reset()
 
 trim = M('tint_trim', '#efe6d2', 0.8)

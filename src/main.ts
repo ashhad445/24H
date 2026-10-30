@@ -33,6 +33,7 @@ import { Vultures } from './world/Vultures';
 import { CanyonView } from './world/CanyonView';
 import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadPoint, roadX, roadYaw } from './world/World';
 import { RockPiles } from './world/RockPiles';
+import { Graphics } from './fx/Graphics';
 import { MafiaView } from './traffic/MafiaView';
 
 // ---------- renderer & scene ----------
@@ -49,13 +50,14 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 2500);
 const lightPool = new LightPool(scene);
 addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight);
+  gfx.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov);
 });
 
 const world = new World(scene);
+const gfx = new Graphics(renderer, scene, camera, world.skyMaterial, world.sun);
 void Assets.preload(); // Blender models; everything falls back to procedural until they arrive
 const rv = new RVModel();
 scene.add(rv.root);
@@ -90,7 +92,7 @@ sideRT.forEach((rt, i) => {
 
 const input = new Input(canvas);
 const sound = new Sound();
-const settings = setupSettings(sound, input);
+const settings = setupSettings(sound, input, (q) => { gfx.setQuality(q); fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov); });
 canvas.addEventListener('mousedown', () => { const first = !sound.ctx; sound.init(); if (first) settings.reapply(); });
 const hud = new HUD();
 sound.onCaption = (who, text) => hud.caption(who, text);
@@ -113,7 +115,8 @@ const avatars = new Map<number, Avatar>();
 const raycaster = new THREE.Raycaster();
 raycaster.camera = camera;
 const fx = new Effects(rv, dyn);
-fx.setScale(innerHeight * renderer.getPixelRatio(), camera.fov);
+gfx.setQuality(settings.gfx);
+fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov);
 const nozzlePos = new THREE.Vector3(), nozzleDir = new THREE.Vector3();
 
 // render the world behind the lobby
@@ -519,7 +522,8 @@ async function start() {
     const sway = drunk > 0 ? Math.min(1, drunk / 30) : 0;
     if (sway > 0) camera.rotateZ(Math.sin(tt * 0.9) * 0.06 * sway);
     canvas.style.filter = sway > 0 ? `blur(${(0.4 + 0.6 * Math.abs(Math.sin(tt * 0.7))) * sway}px) saturate(${1 + 0.4 * sway})` : '';
-    renderer.render(scene, camera);
+    gfx.update(dt, 1 - world.daylight, world.stormLevel);
+    gfx.render();
     if (sway > 0) camera.rotateZ(-Math.sin(tt * 0.9) * 0.06 * sway);
     input.endFrame();
   };
@@ -549,7 +553,7 @@ const lobbyRender = () => {
   if (!lobbyLoop) return;
   requestAnimationFrame(lobbyRender);
   world.update(rv.root.position, camera.position, 7.5);
-  renderer.render(scene, camera);
+  gfx.render();
 };
 lobbyRender();
 start();

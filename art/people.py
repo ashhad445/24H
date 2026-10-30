@@ -5,7 +5,7 @@
 #   armL/armR pivot (±0.33, 1.5, 0), hand at y −0.64 below the shoulder
 # Hats / hair / beards are modelled around the hat band at y = 0 (head-local 0.36), for a head radius 0.231.
 # Materials named tint_* are recolored per character in code.
-exec(open(r'E:\24H\art\lib.py').read())
+import os; exec(open(os.path.join(os.environ.get('ART_DIR', r'E:\24H\art'), 'lib.py')).read())
 reset()
 
 skin = M('tint_skin', '#e0ac69', 0.7)

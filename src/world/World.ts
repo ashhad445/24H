@@ -260,6 +260,9 @@ export class World {
   private dust: THREE.Points;
   private dustMat: THREE.PointsMaterial;
   private storm = 0;
+  /** The sky dome shader (Graphics bakes reflections from it). */
+  get skyMaterial() { return this.skyMat; }
+  get stormLevel() { return this.storm; }
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.group);

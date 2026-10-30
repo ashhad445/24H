@@ -2,7 +2,7 @@
 # Every variant is a root object named <kind>_<n>, origin on the ground. Units match World.ts:
 # saguaro ~4.5 m, barrel ~0.7 m, rock/shrub ~1 m (scaled per instance), mesa/cliff are UNIT size
 # (radius/half-width 1, height 1) because World scales them non-uniformly.
-exec(open(r'E:\24H\art\lib.py').read())
+import os; exec(open(os.path.join(os.environ.get('ART_DIR', r'E:\24H\art'), 'lib.py')).read())
 reset()
 random.seed(7)
 
