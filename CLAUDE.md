@@ -432,13 +432,15 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Train crossing**: bells + flashers when you're ~9 s away, gates drop, a 22–36 car freight train crosses at 22 m/s. The engineer's horn (long-long-short-long, muffled by distance) carries ~2.5 km, so you hear the train before you see it. Train hits the RV = −35. Squeeze across first = "BEAT THE TRAIN". Snapping a gate in front of Roscoe = +1 heat.
   - New sounds: moo, hiss, train horn, scrape, squawk.
   - Dev (`?dev`): **F5** cycles encounter kinds ahead of the RV; `game.enc('train', 300)` forces one at a distance.
-- [x] **Graphics pass** (in progress):
+- [x] **Graphics pass**:
   - **Headless Blender**: `pip install bpy` (Blender 5.2 as a Python module) into a venv. `BPY_PY=<venv python> scripts/art-build.sh [names]` builds `art/*.py` → `public/models/*.glb` without the Blender app. `art/lib.py` reads `ART_OUT` / `ART_DIR`, so the same scripts still run in Blender via the MCP. `<venv python> art/preview.py <glb> out.png [filter] [cols] [--side|--fast]` renders a Cycles contact sheet for checking a model.
   - **Quality setting** (`fx/Graphics.ts`, Esc menu → Graphics):
     - Low: direct render, 1024 shadows, pixel ratio 1.
     - Medium: half-res bloom + grade, 2048 shadows.
     - High: full bloom, 4096 shadows, pixel ratio ≤ 2.
   - **Look**: sky reflections (a PMREM env map baked from the sky dome every 4 s, on at every quality so shaders never change), bloom, a warm color grade, vignette and grain. The composer renders the scene into a half-float target, which uses the same shader variant as the mirrors, so `warm()` still covers it.
+  - **Sky / terrain / road** (`world/Sky.ts`, `Terrain.ts`, `TexGen.ts`, `Noise.ts`, `DustTrail.ts`): scattering sky with drifting clouds, sun glare, twilight palette; fog colour = sky horizon. Streamed terrain strips per chunk: flat (y = −0.02) within 40 m of any road and around stop clear-zones, dunes and hills beyond, 3 parallax rings of far mountains. Procedural asphalt (tracks, cracks, patches, oil), worn paint, gravel shoulders. Stars have per-star size / brightness / tint + twinkle. Low sun: warm sky fill and flatter ground/asphalt normal maps (no dark speckle at sunset). `world.quality` is set by `main.ts` with the Esc-menu setting (dust trail + mountain shimmer only on Medium / High).
+  - **Vehicles & animals** (`art/vehicles.py` → `vehicles.glb`, `art/animals.py` → `animals.glb`): sedan, cop, pickup, bandit pickup, camper, semi, shark car, wheels, drivers; locomotive + box/tank/hopper cars, crossing signal; cows (superellipse barrel body, 3 irregular patch layouts with refined patch borders), ostrich, cone. Procedural fallbacks stay until the glbs load.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 

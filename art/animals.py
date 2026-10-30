@@ -123,58 +123,121 @@ def fin(o, pivot=None, ang=45):
 
 
 # ---------------------------------------------------------------- cow
+def ering(w, cy, h, p=2.5, n=20):
+    """Superellipse cross-section (p 2 = ellipse, higher = squarer), centred on (0, cy)."""
+    pts = []
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        c, s_ = math.cos(a), math.sin(a)
+        pts.append((w * math.copysign(abs(c) ** (2 / p), c), cy + h * math.copysign(abs(s_) ** (2 / p), s_)))
+    return pts
+
+
+def eloft(name, secs, mat, n=20):
+    """Loft superellipse sections [(z, w, cy, h, p), ...] along game Z; ends closed with a fan."""
+    bm = bmesh.new()
+    rings = [[bm.verts.new(G(x, y, z)) for x, y in ering(w, cy, h, p, n)] for (z, w, cy, h, p) in secs]
+    for a, b in zip(rings, rings[1:]):
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    for ring, (z, w, cy, h, p), rev in ((rings[0], secs[0], True), (rings[-1], secs[-1], False)):
+        c = bm.verts.new(G(0, cy, z))
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((ring[j], ring[i], c) if rev else (ring[i], ring[j], c))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return _new(name, bm, mat, True)
+
+
+def paint_blobs(o, blobs, slot, seed, refine=3):
+    """Irregular cow patches: faces whose centre falls inside a wobbly blob get material `slot`.
+    Edges that cross a patch border are split a few times first, so the border is finely stepped, not blocky."""
+    ph = seed * 1.7
+
+    def inside(c):
+        gx, gy, gz = c.x, c.z, -c.y
+        for (bx, by, bz, r) in blobs:
+            wob = 1 + 0.28 * math.sin(gz * 9 + gy * 5 + ph) * math.sin(gy * 11 - gz * 3 + ph * 2) + 0.12 * math.sin(gx * 13 + gz * 17)
+            if (gx - bx) ** 2 * 0.6 + (gy - by) ** 2 * 0.9 + (gz - bz) ** 2 < (r * wob) ** 2:
+                return True
+        return False
+
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    for _ in range(refine):
+        cross = [e for e in bm.edges if inside(e.verts[0].co) != inside(e.verts[1].co)]
+        if not cross:
+            break
+        bmesh.ops.subdivide_edges(bm, edges=cross, cuts=1, use_grid_fill=False, quad_corner_type='INNER_VERT')
+    bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 4])
+    for f in bm.faces:
+        if inside(f.calc_center_median()):
+            f.material_index = slot
+    bm.to_mesh(o.data)
+    bm.free()
+
+
 def cow_body(seed):
     parts = []
-    torso = loft('cb', [S(-0.9, .26, .86, 1.3, rb=.12, rt=.13), S(-0.75, .39, .76, 1.42, rb=.16, rt=.16, crown=.02), S(-0.25, .43, .66, 1.44, rb=.16, rt=.16),
-                        S(0.35, .43, .68, 1.42, rb=.16, rt=.16), S(0.78, .38, .78, 1.4, rb=.15, rt=.15), S(0.92, .27, .9, 1.32, rb=.12, rt=.12)], hide)
+    # barrel torso: rounded superellipse sections, deep chest, slight sag behind the shoulders, square-ish rump
+    torso = eloft('cb', [(-0.97, .12, 1.14, .14, 2.2), (-0.9, .27, 1.12, .27, 2.3), (-0.72, .38, 1.1, .36, 2.4),
+                         (-0.4, .43, 1.06, .39, 2.5), (0.05, .45, 1.03, .39, 2.5), (0.45, .44, 1.07, .37, 2.6),
+                         (0.75, .4, 1.12, .32, 2.8), (0.9, .3, 1.15, .25, 2.6), (0.97, .14, 1.17, .13, 2.2)], hide, n=22)
     subdivide_loft(torso, 1)
     torso.data.materials.append(patch)
-    paint_patches(torso, patch_layout(seed), 1)
+    paint_blobs(torso, patch_layout(seed), 1, seed)
     parts.append(torso)
-    # shoulder hump + hip bones for a bovine silhouette
-    parts.append(ball('hump', (0, 1.43, -0.45), 0.2, hide, sub=1, scale=(1.3, 0.7, 1.5)))
-    parts.append(ball('udder', (0, 0.66, 0.45), 0.16, pink, sub=1, scale=(1.1, 0.75, 1.0)))
+    # shoulder hump, hip bones, upper legs blended into the barrel
+    parts.append(ball('hump', (0, 1.4, -0.5), 0.22, hide, sub=2, scale=(1.4, 0.6, 1.5)))
+    for sx in (-1, 1):
+        parts.append(ball('hip', (sx * 0.24, 1.36, 0.6), 0.1, hide, sub=2, scale=(1, 0.6, 1.2)))
+        parts.append(ball('thigh', (sx * 0.29, 0.9, 0.6), 0.2, hide, sub=2, scale=(0.75, 1.3, 1.05)))
+        parts.append(ball('shoulder', (sx * 0.29, 0.92, -0.6), 0.18, hide, sub=2, scale=(0.75, 1.3, 0.95)))
+    parts.append(ball('udder', (0, 0.66, 0.42), 0.16, pink, sub=2, scale=(1.1, 0.75, 1.0)))
     for dx in (-0.06, 0.06):
-        parts.append(cyl('teat', (dx, 0.53, 0.5), 0.02, 0.018, 0.1, pink, n=5))
-    parts.append(tube('tail', [(0, 1.38, 0.86), (0, 1.15, 0.97), (0, 0.78, 1.0)], 0.035, hide, n=5))
-    parts.append(ball('tuft', (0, 0.68, 1.0), 0.07, patch, sub=1, scale=(0.8, 1.4, 0.8)))
-    o = join(parts, 'cow_body_%d' % seed)
-    return o
+        for dz in (0.37, 0.48):
+            parts.append(cyl('teat', (dx, 0.53, dz), 0.022, 0.016, 0.1, pink, n=6))
+    parts.append(tube('tail', [(0, 1.4, 0.95), (0, 1.25, 1.02), (0, 1.0, 1.04), (0, 0.78, 1.03)], [0.045, 0.035, 0.03, 0.028], hide, n=6))
+    parts.append(ball('tuft', (0, 0.7, 1.03), 0.07, patch, sub=2, scale=(0.8, 1.5, 0.8)))
+    return join(parts, 'cow_body_%d' % seed)
 
 
 for sd in range(3):
-    fin(cow_body(sd), None)
+    fin(cow_body(sd), None, ang=70)
 
 
 def cow_head():
     parts = []
-    # neck + skull + muzzle, built around the pivot (0, 1.25, -0.95) in game coordinates
-    parts.append(loft('neck', [S(-0.7, .2, 1.0, 1.42, rb=.08, rt=.1), S(-0.95, .17, 1.05, 1.42, rb=.08, rt=.1), S(-1.15, .2, 1.0, 1.5, rb=.08, rt=.1)], hide))
-    skull = loft('skull', [S(-1.02, .19, 1.04, 1.48, rb=.07, rt=.08), S(-1.2, .21, 1.02, 1.5, rb=.08, rt=.09), S(-1.38, .16, 1.04, 1.38, rb=.07, rt=.08), S(-1.47, .15, 1.06, 1.3, rb=.06, rt=.07)], hide)
-    parts.append(skull)
-    parts.append(box('muzzle', (0, 1.14, -1.5), (0.34, 0.22, 0.14), pink, bev=0.05, seg=2))
+    # neck + skull + muzzle around the pivot (0, 1.25, -0.95); dewlap hangs under the neck
+    parts.append(eloft('neck', [(-0.62, .26, 1.18, .3, 2.2), (-0.85, .21, 1.24, .26, 2.2), (-1.08, .18, 1.3, .21, 2.2)], hide, n=16))
+    parts.append(ball('dewlap', (0, 1.0, -0.92), 0.13, hide, sub=2, scale=(0.6, 1.2, 1.4)))
+    parts.append(eloft('skull', [(-1.0, .17, 1.33, .18, 2.3), (-1.12, .2, 1.32, .19, 2.4), (-1.3, .17, 1.27, .16, 2.4),
+                                 (-1.45, .14, 1.2, .13, 2.3), (-1.52, .1, 1.18, .08, 2.2)], hide, n=16))
+    parts.append(ball('muzzle', (0, 1.16, -1.5), 0.15, pink, sub=2, scale=(1.15, 0.85, 0.75)))
+    parts.append(ball('poll', (0, 1.47, -1.12), 0.1, patch, sub=2, scale=(1.4, 0.5, 1.0)))  # dark tuft between the horns
     for s in (-1, 1):
-        parts.append(ball('nostril', (s * 0.07, 1.16, -1.575), 0.02, dark, sub=1))
-        parts.append(ball('eye', (s * 0.2, 1.33, -1.28), 0.032, eyeM, sub=1))
-        parts.append(box('ear', (s * 0.29, 1.4, -1.1), (0.22, 0.07, 0.12), patch, bev=0.02))
-        parts.append(cyl('horn', (s * 0.23, 1.55, -1.12), 0.03, 0.012, 0.11, horn, n=6, axis='x'))
-    o = join(parts, 'cow_head')
-    return o
+        parts.append(ball('nostril', (s * 0.065, 1.17, -1.61), 0.025, dark, sub=1))
+        parts.append(ball('eye', (s * 0.175, 1.36, -1.25), 0.034, eyeM, sub=2))
+        parts.append(ball('ear', (s * 0.3, 1.39, -1.1), 0.1, patch, sub=2, scale=(1.4, 0.35, 0.75)))
+        parts.append(ball('earpink', (s * 0.31, 1.38, -1.11), 0.07, pink, sub=1, scale=(1.3, 0.3, 0.6)))
+        parts.append(tube('horn', [(s * 0.13, 1.47, -1.12), (s * 0.24, 1.53, -1.12), (s * 0.29, 1.62, -1.15)], [0.035, 0.026, 0.01], horn, n=6))
+    return join(parts, 'cow_head')
 
 
-fin(cow_head(), (0, 1.25, -0.95))
+fin(cow_head(), (0, 1.25, -0.95), ang=70)
 
 
 def cow_leg(name, hind):
     parts = []
-    if hind:
-        path = [(0, 0.0, 0.0), (0, -0.28, 0.1), (0, -0.5, -0.02), (0, -0.62, 0.02)]
-        radii = [0.12, 0.085, 0.06, 0.055]
-    else:
-        path = [(0, 0.0, 0.0), (0, -0.3, -0.01), (0, -0.55, 0.0), (0, -0.62, 0.0)]
-        radii = [0.1, 0.075, 0.06, 0.055]
-    parts.append(tube('leg', [(x, 0.72 + y, z) for x, y, z in path], radii, hide, n=6))
-    parts.append(box('hoof', (0, 0.05, path[-1][2]), (0.15, 0.1, 0.17), hoof, bev=0.03))
+    if hind:  # hock bends backward
+        path = [(0, 0.0, 0.0), (0, -0.22, 0.08), (0, -0.4, 0.1), (0, -0.55, 0.02), (0, -0.64, 0.02)]
+        radii = [0.12, 0.09, 0.065, 0.055, 0.055]
+    else:  # knee bends forward slightly
+        path = [(0, 0.0, 0.0), (0, -0.25, -0.01), (0, -0.4, -0.02), (0, -0.55, 0.0), (0, -0.64, 0.0)]
+        radii = [0.11, 0.08, 0.07, 0.055, 0.055]
+    parts.append(tube('leg', [(x, 0.72 + y, z) for x, y, z in path], radii, hide, n=8))
+    parts.append(cyl('hoof', (0, 0.05, path[-1][2] - 0.01), 0.075, 0.062, 0.1, hoof, n=8))
     return join(parts, name)
 
 

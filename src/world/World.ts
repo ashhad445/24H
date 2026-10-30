@@ -275,6 +275,7 @@ export class World {
   /** 0 = night, 1 = full day */
   daylight = 1;
   private stars: THREE.Points;
+  private starUni!: { opacity: { value: number }; time: { value: number }; pr: { value: number } };
   private moon: THREE.DirectionalLight;
   private dust: THREE.Points;
   private dustMat: THREE.PointsMaterial;
@@ -298,13 +299,40 @@ export class World {
     scene.add(this.trail.points);
 
     // night sky: stars on the upper hemisphere + dim blue moonlight
-    const starPos: number[] = [];
-    for (let i = 0; i < 1800; i++) {
+    // Each star gets its own size, brightness and tint: lots of faint pinpricks, a few bright ones
+    // (power-law), with a slow twinkle. Round soft points instead of square dots.
+    const starPos: number[] = [], starAttr: number[] = [], starCol: number[] = [];
+    const tints = [[1, 1, 1], [0.8, 0.88, 1], [1, 0.92, 0.78], [1, 0.82, 0.7]];
+    for (let i = 0; i < 2600; i++) {
       const u = Math.random() * Math.PI * 2, v = Math.acos(Math.random() * 0.95);
       starPos.push(Math.sin(v) * Math.cos(u) * 1700, Math.cos(v) * 1700, Math.sin(v) * Math.sin(u) * 1700);
+      const m = Math.pow(Math.random(), 4); // magnitude: 0 = faintest
+      starAttr.push(0.9 + m * 2.6, 0.32 + m * 0.9, Math.random() * 6.28);
+      const t = tints[Math.random() < 0.7 ? 0 : 1 + Math.floor(Math.random() * 3)];
+      starCol.push(t[0], t[1], t[2]);
     }
-    const starGeo = new THREE.BufferGeometry(); starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
-    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    starGeo.setAttribute('star', new THREE.Float32BufferAttribute(starAttr, 3)); // size px, brightness, twinkle phase
+    starGeo.setAttribute('tint', new THREE.Float32BufferAttribute(starCol, 3));
+    this.starUni = { opacity: { value: 0 }, time: { value: 0 }, pr: { value: 1 } };
+    this.stars = new THREE.Points(starGeo, new THREE.ShaderMaterial({
+      uniforms: this.starUni, transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+      vertexShader: `attribute vec3 star; attribute vec3 tint; uniform float time, pr, opacity; varying float vB; varying vec3 vC;
+        void main(){
+          vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+          float tw = 0.75 + 0.25 * sin(time * (1.3 + star.z) + star.z * 9.0);
+          float horizon = smoothstep(0.0, 0.25, normalize(position).y); // dimmer near the horizon (extinction)
+          vB = star.y * tw * opacity * mix(0.35, 1.0, horizon); vC = tint;
+          gl_PointSize = star.x * pr;
+        }`,
+      fragmentShader: `varying float vB; varying vec3 vC;
+        void main(){
+          float d = length(gl_PointCoord - 0.5) * 2.0;
+          float a = smoothstep(1.0, 0.0, d); a *= a;
+          gl_FragColor = vec4(vC * vB * a, 1.0);
+        }`,
+    }));
     this.stars.renderOrder = -1;
     scene.add(this.stars);
     this.moon = new THREE.DirectionalLight('#8fa8ff', 0);
@@ -534,12 +562,19 @@ export class World {
       shimmer: low ? 0 : sm(sy, 0.55, 0.9) * (1 - st) * (this.quality === 'high' ? 1 : 0.6), time: this.time, night: 1 - day,
     });
 
-    (this.stars.material as THREE.PointsMaterial).opacity = nightAmt * (1 - st) * 0.9 * (1 - 0.35 * cover);
+    this.starUni.opacity.value = nightAmt * (1 - st) * 0.9 * (1 - 0.35 * cover);
+    this.starUni.time.value = this.time % 1000;
+    this.starUni.pr.value = Math.min(this.quality === 'low' ? 1 : this.quality === 'medium' ? 1.5 : 2, globalThis.devicePixelRatio || 1);
     this.moon.intensity = (1 - day) * 0.35;
     this.sun.intensity = 2.6 * day * (1 - st * 0.6);
     this.sun.color.set('#fff0d0').lerp(new THREE.Color('#ff9a50'), dusk);
-    this.hemi.intensity = 0.07 + 0.83 * day;
-    this.hemi.color.set('#cfe3ff').lerp(new THREE.Color('#4a5a8a'), 1 - day);
+    // at a low sun the ground is lit edge-on: add warm sky fill around dusk and flatten the sand/asphalt normal maps
+    // (grazing light turns their micro-detail into dark speckle)
+    this.hemi.intensity = 0.07 + 0.83 * day + 0.3 * dusk * day;
+    this.hemi.color.set('#cfe3ff').lerp(this.tmpWarm.set('#4a5a8a'), 1 - day).lerp(this.tmpWarm.set('#ffb48a'), 0.35 * dusk * day);
+    const ns = 0.25 + 0.45 * sm(sy, 0.08, 0.4);
+    this.groundMat.normalScale.setScalar(ns);
+    (this.mats.asphalt as THREE.MeshStandardMaterial).normalScale.setScalar(ns);
   }
 
   /** Green overhead highway signs announcing a fork, one per branch. */
