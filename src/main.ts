@@ -116,6 +116,9 @@ const raycaster = new THREE.Raycaster();
 raycaster.camera = camera;
 const fx = new Effects(rv, dyn);
 gfx.setQuality(settings.gfx); world.quality = settings.gfx;
+// GPU reset (driver timeout, tab out of video memory): three restores the context itself; rebuild the post targets too
+canvas.addEventListener('webglcontextrestored', () => { gfx.setQuality(gfx.quality); console.warn('WebGL context restored'); });
+canvas.addEventListener('webglcontextlost', () => console.warn('WebGL context lost'));
 fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov);
 const nozzlePos = new THREE.Vector3(), nozzleDir = new THREE.Vector3();
 

@@ -35,6 +35,20 @@ const GradeShader = {
     }`,
 };
 
+/** Drops NaN / Inf pixels and caps extreme HDR values before bloom. A single bad pixel (some GPUs make one from
+ *  a degenerate normal or a 0/0 in a shader) would otherwise be blurred by bloom across the whole screen = black frames. */
+const SanitizeShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec3 v = c.rgb;
+      if (any(isnan(v)) || any(isinf(v))) v = vec3(0.0);
+      gl_FragColor = vec4(clamp(v, 0.0, 64.0), 1.0);
+    }`,
+};
+
 export class Graphics {
   quality: Quality = 'medium';
   private composer: EffectComposer | null = null;
@@ -83,6 +97,7 @@ export class Graphics {
       const rt = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 });
       const c = new EffectComposer(r, rt);
       c.addPass(new RenderPass(this.scene, this.camera));
+      c.addPass(new ShaderPass(SanitizeShader));
       const bs = q === 'high' ? 1 : 0.5;
       this.bloom = new UnrealBloomPass(new THREE.Vector2(w * bs, h * bs), 0.32, 0.55, 1.05);
       c.addPass(this.bloom);
