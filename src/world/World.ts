@@ -5,6 +5,10 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { CFG } from '../config';
 import { Assets, BAKED_MAT } from '../core/AssetLoader';
 import { FORKS, branchAt, chosen, forkZ, routeOffset, routeVersion, type Fork } from './Route';
+import { ASPHALT_L, makeAsphalt, makeGravel, makePaintWear, makeSand } from './TexGen';
+import { createSkyMaterial, duskAmount, skyColor, toDisplay } from './Sky';
+import { DustTrail } from './DustTrail';
+import { GROUND_Y, Mountains, buildTerrainGeometry, createGroundMaterial, setTerrainCtx, terrainH, type GroundUniforms } from './Terrain';
 
 // ---------- road centerline ----------
 /** The base highway before any fork offsets. */
@@ -66,6 +70,29 @@ function cleared(wx: number, wz: number) {
   }
   return false;
 }
+
+/** Distance (m) from a point to the nearest stop clear-zone rectangle (0 inside one). */
+function zoneDist(wx: number, wz: number) {
+  let best = 1e9;
+  for (const c of clearZones) {
+    const dx = wx - c.x, dz = wz - c.z; const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
+    const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+    const ox = Math.max(c.x0 - lx, 0, lx - c.x1), oz = Math.max(c.z0 - lz, 0, lz - c.z1);
+    const d = Math.hypot(ox, oz);
+    if (d < best) best = d;
+  }
+  return best;
+}
+/** Distance (m) to the nearest road centerline: the main road or a fork's other branch. */
+function roadDist(x: number, z: number) {
+  let d = Math.abs(x - roadX(z)) / Math.hypot(1, roadDX(z));
+  for (const f of FORKS) {
+    const fz = forkZ(f);
+    if (z < fz + 80 && z > fz - ALT_LEN - 80) d = Math.min(d, Math.abs(x - altX(z, f)) / Math.hypot(1, altX(z + 0.5, f) - altX(z - 0.5, f)));
+  }
+  return d;
+}
+setTerrainCtx({ roadDist, zoneDist });
 
 // ---------- hazards (deterministic per chunk so host & clients agree) ----------
 export interface Hazard { id: number; type: 'pothole' | 'debris'; x: number; z: number; r: number }
@@ -138,25 +165,8 @@ export function hazardsNear(z: number): Hazard[] {
   return [...chunkHazards(ci - 1), ...chunkHazards(ci), ...chunkHazards(ci + 1)];
 }
 
-function noiseTexture(size: number, base: string, specks: string[], count: number) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  const g = c.getContext('2d')!;
-  g.fillStyle = base; g.fillRect(0, 0, size, size);
-  for (let i = 0; i < count; i++) {
-    g.fillStyle = specks[i % specks.length];
-    g.globalAlpha = 0.25 + Math.random() * 0.4;
-    const r = 1 + Math.random() * 3;
-    g.fillRect(Math.random() * size, Math.random() * size, r, r);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
-  return t;
-}
-
 /** Ribbon following the road between z0 and z1, from lateral offset a to b. */
-function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 5, xf: (z: number) => number = roadX): THREE.BufferGeometry {
+function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 5, xf: (z: number) => number = roadX, uvm?: { flip: number; shift: number }): THREE.BufferGeometry {
   const n = Math.max(1, Math.ceil(Math.abs(z1 - z0) / step));
   const pos: number[] = []; const uv: number[] = []; const idx: number[] = [];
   for (let k = 0; k <= n; k++) {
@@ -165,7 +175,7 @@ function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 
     const len = Math.hypot(1, dx); const nx = 1 / len; const nz = -dx / len;
     for (const off of [a, b]) {
       pos.push(cx + nx * off, y, z + nz * off);
-      uv.push(off / 4, z / 4);
+      if (uvm) uv.push(off * uvm.flip, z + uvm.shift); else uv.push(off / 4, z / 4);
     }
     if (k < n) { const i = k * 2; idx.push(i, i + 1, i + 2, i + 1, i + 3, i + 2); }
   }
@@ -243,8 +253,17 @@ export class World {
   readonly hemi: THREE.HemisphereLight;
   private sky: THREE.Mesh;
   private skyMat: THREE.ShaderMaterial;
-  private ground: THREE.Mesh;
-  private groundTex: THREE.Texture;
+  private mountains = new Mountains();
+  private trail = new DustTrail();
+  private groundMat: THREE.MeshStandardMaterial;
+  private groundUni: GroundUniforms;
+  private time = 0;
+  private cloudOff = new THREE.Vector2(0.37, 0.12);
+  private quality: 'low' | 'medium' | 'high' = 'medium';
+  private qualityT = 0;
+  private tmpA = new THREE.Color(); private tmpB = new THREE.Color(); private tmpC = new THREE.Color();
+  private tmpNightHor = new THREE.Color(); private tmpDust = new THREE.Color(); private tmpSun = new THREE.Color(); private tmpWarm = new THREE.Color();
+  private tmpAmb = new THREE.Color(); private tmpFar = new THREE.Color(); private tmpDisp = new THREE.Color(); private fogLin = new THREE.Color();
   private chunks = new Map<number, Chunk>();
   private mats: Record<string, THREE.Material>;
   private geos: Record<string, THREE.BufferGeometry>;
@@ -267,25 +286,16 @@ export class World {
   constructor(private scene: THREE.Scene) {
     scene.add(this.group);
 
-    // sky dome
-    this.skyMat = new THREE.ShaderMaterial({
-      side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: {
-        top: { value: new THREE.Color('#3d7fd6') },
-        horizon: { value: new THREE.Color('#f2d9b0') },
-        sunDir: { value: this.sunDir },
-        sunColor: { value: new THREE.Color('#fff2cc') },
-      },
-      vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; varying vec3 vDir;
-        void main(){ float h = clamp(vDir.y, -0.2, 1.0); vec3 col = mix(horizon, top, pow(max(h,0.0), 0.55));
-          float s = max(dot(normalize(vDir), sunDir), 0.0); col += sunColor * (pow(s, 900.0) * 2.0 + pow(s, 12.0) * 0.25);
-          gl_FragColor = vec4(col, 1.0); }`,
-    });
-    this.sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 32, 16), this.skyMat);
+    // sky dome (Rayleigh / Mie + twilight + clouds, see Sky.ts) and the far mountain rings
+    this.skyMat = createSkyMaterial(this.sunDir);
+    this.sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 48, 24), this.skyMat);
     this.sky.renderOrder = -1;
+    this.sky.frustumCulled = false;
     scene.add(this.sky);
     scene.fog = new THREE.Fog(0xf2d9b0, 250, 1500);
+    this.mountains.group.renderOrder = -1;
+    scene.add(this.mountains.group);
+    scene.add(this.trail.points);
 
     // night sky: stars on the upper hemisphere + dim blue moonlight
     const starPos: number[] = [];
@@ -322,24 +332,21 @@ export class World {
     this.sun.shadow.normalBias = 0.04;
     scene.add(this.sun, this.sun.target);
 
-    // ground (follows the focus, texture stays world-anchored)
-    this.groundTex = noiseTexture(256, '#d6aa72', ['#b98a55', '#e8c38e', '#a8784a', '#c99a63'], 2600);
-    this.groundTex.repeat.set(3000 / 24, 3000 / 24);
-    this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(3000, 3000).rotateX(-Math.PI / 2),
-      new THREE.MeshStandardMaterial({ map: this.groundTex, roughness: 1 }),
-    );
-    this.ground.position.y = -0.02;
-    this.ground.receiveShadow = true;
-    this.group.add(this.ground);
+    // ground: streamed with the road chunks (rolling dunes away from the road, flat in the corridor and at stops)
+    const sand = makeSand();
+    const ground = createGroundMaterial(sand.map, sand.normal, sand.meanLum, ROAD_HALF + 1.6);
+    this.groundMat = ground.mat; this.groundUni = ground.uni;
 
     // shared materials & prop geometry
-    const asphaltTex = noiseTexture(128, '#3b3b40', ['#2c2c30', '#4a4a50', '#56565c'], 900);
+    const asph = makeAsphalt(LANE_W);
+    const gravel = makeGravel();
+    gravel.map.repeat.set(4 / 3, 4 / 3); gravel.normal.repeat.set(4 / 3, 4 / 3);
+    const paint = makePaintWear();
     this.mats = {
-      asphalt: new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.95 }),
-      shoulder: new THREE.MeshStandardMaterial({ color: '#a8875e', roughness: 1 }),
-      white: new THREE.MeshStandardMaterial({ color: '#f4f1e8', roughness: 0.8 }),
-      yellow: new THREE.MeshStandardMaterial({ color: '#f2b90c', roughness: 0.8 }),
+      asphalt: new THREE.MeshStandardMaterial({ map: asph.macro, roughnessMap: asph.rough, roughness: 1, normalMap: asph.micro, normalScale: new THREE.Vector2(0.7, 0.7) }),
+      shoulder: new THREE.MeshStandardMaterial({ map: gravel.map, normalMap: gravel.normal, roughness: 1 }),
+      white: new THREE.MeshStandardMaterial({ color: '#f4f1e8', map: paint, alphaTest: 0.4, alphaToCoverage: true, roughness: 0.8 }),
+      yellow: new THREE.MeshStandardMaterial({ color: '#f2b90c', map: paint, alphaTest: 0.4, alphaToCoverage: true, roughness: 0.8 }),
       cactus: new THREE.MeshStandardMaterial({ color: '#5b8c3a', roughness: 0.9, flatShading: true }),
       rock: new THREE.MeshStandardMaterial({ color: '#a0603a', roughness: 1, flatShading: true }),
       shrub: new THREE.MeshStandardMaterial({ color: '#8a8f4a', roughness: 1, flatShading: true }),
@@ -447,37 +454,97 @@ export class World {
       a.needsUpdate = true;
       this.dust.position.copy(camPos);
     }
-    const gx = Math.round(focus.x / 24) * 24; const gz = Math.round(focus.z / 24) * 24;
-    this.ground.position.set(gx, -0.02, gz);
-    this.groundTex.offset.set(gx / 24, -gz / 24);
+    this.time += dt;
+    this.cloudOff.x += (0.007 + 0.01 * Math.abs(wind) + 0.03 * storm) * dt;
+    this.cloudOff.y += 0.003 * dt;
+    this.qualityT -= dt;
+    if (this.qualityT <= 0) { this.qualityT = 1.5; this.readQuality(); }
 
-    this.applyTime(hour);
+    this.trail.update(dt, focus, roadDist(focus.x, focus.z) > ROAD_HALF + 1.2, this.daylight, wind, this.quality !== 'low');
+    this.applyTime(hour, camPos);
+    this.mountains.group.position.set(camPos.x, 0, camPos.z);
     this.sun.position.copy(focus).addScaledVector(this.sunDir, 120);
     this.sun.target.position.copy(focus);
   }
 
-  private applyTime(hour: number) {
+  /** The Low / Medium / High setting lives in localStorage (ui/Settings.ts); poll it so the world can gate its own extras. */
+  private readQuality() {
+    try {
+      const q = JSON.parse(localStorage.getItem('rr-settings') ?? '{}').gfx;
+      if (q === 'low' || q === 'medium' || q === 'high') this.quality = q;
+    } catch { /* storage blocked: stay on medium */ }
+  }
+
+  private applyTime(hour: number, camPos: THREE.Vector3) {
     const h = ((hour % 24) + 24) % 24;
     const el = Math.sin(((h - 5) / 14) * Math.PI) * 1.15; // sunrise 5:00, sunset 19:00
     const az = ((h - 12) / 12) * Math.PI * 0.9;
     this.sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el) * 0.6).normalize();
+    const sy = this.sunDir.y;
     const day = THREE.MathUtils.smoothstep(Math.sin(el), -0.08, 0.3);
     const dusk = Math.max(0, 1 - Math.abs(Math.sin(el)) / 0.25) * (el > -0.3 ? 1 : 0);
     this.daylight = day;
-
-    const top = new THREE.Color('#0b1030').lerp(new THREE.Color('#3d7fd6'), day);
-    const hor = new THREE.Color('#1c2245').lerp(new THREE.Color('#f2d9b0'), day).lerp(new THREE.Color('#f08a4b'), dusk * 0.7);
-    // sandstorm: brown sky, thick fog, dimmer sun
     const st = this.storm;
-    const dustCol = new THREE.Color('#b08458').multiplyScalar(0.35 + 0.65 * day);
-    top.lerp(dustCol, st * 0.85); hor.lerp(dustCol, st);
-    this.skyMat.uniforms.top.value.copy(top);
-    this.skyMat.uniforms.horizon.value.copy(hor);
+    const low = this.quality === 'low';
+    const U = this.skyMat.uniforms;
+    const sm = THREE.MathUtils.smoothstep;
+
+    // --- sky colours at the horizon (fog / haze) and aloft (cloud ambient)
+    const cs = Math.sqrt(Math.max(0, 1 - sy * sy));
+    const hcos = (phi: number, dy = 0.03) => cs * Math.cos(phi) * Math.sqrt(1 - dy * dy) + sy * dy;
+    const haze = this.tmpA, tmp = this.tmpB, glow = this.tmpC;
+    skyColor(0.03, hcos(Math.PI / 2), 0.5, sy, haze);
+    skyColor(0.03, hcos(0.9), 0.8, sy, tmp);
+    haze.lerp(tmp, 0.15);
+    // warm cream haze in daylight (golden desert air), blue-grey at night, brown in a sandstorm
+    const warm = sm(sy, 0.05, 0.35) * (1 - duskAmount(sy));
+    haze.r *= 1 + 0.02 * warm; haze.g *= 1 - 0.06 * warm; haze.b *= 1 - 0.2 * warm;
+    const nightAmt = 1 - sm(sy, -0.28, -0.04);
+    haze.add(this.tmpNightHor.copy(U.uNightHor.value).multiplyScalar(nightAmt));
+    const dust = this.tmpDust.set('#b08458').multiplyScalar(0.35 + 0.65 * day);
+    haze.lerp(dust, st);
+    skyColor(0, hcos(0), 1, sy, glow); // toward the sun at the horizon
+    glow.r = Math.max(0, glow.r - haze.r) * 0.7; glow.g = Math.max(0, glow.g - haze.g) * 0.7; glow.b = Math.max(0, glow.b - haze.b) * 0.7;
+    glow.multiplyScalar(1 - st);
+
+    // --- sun / cloud lighting
+    const f = sm(sy, -0.1, 0.04);
+    const sunCol = this.tmpSun.set('#ffeec8').lerp(this.tmpWarm.set('#ff6a2a'), dusk).multiplyScalar(f).add(this.tmpWarm.setRGB(0.03, 0.04, 0.08).multiplyScalar(1 - f));
+    const amb = skyColor(0.8, sy * 0.8, 0.5, sy, this.tmpAmb).add(this.tmpWarm.copy(U.uNightTop.value).multiplyScalar(nightAmt));
+    U.uHaze.value.copy(haze);
+    U.uDust.value.copy(dust);
+    U.uSunCol.value.copy(sunCol);
+    U.uAmb.value.copy(amb);
+    U.uStorm.value = st;
+    U.uNightAmt.value = nightAmt;
+    U.uMoonI.value = (1 - sm(sy, -0.1, 0.15)) * (1 - st * 0.9);
+    const cover = THREE.MathUtils.lerp(0.3 + 0.09 * Math.sin(this.time * 0.013) + 0.05 * Math.sin(this.time * 0.0071 + 2), 0.9, st) * (1 - 0.2 * nightAmt);
+    U.uCover.value = cover;
+    U.uCloudOff.value.copy(this.cloudOff);
+    U.uCloudQ.value = low ? 0 : 1;
+
+    // --- fog + ground / mountain haze glow
     const fog = this.scene.fog as THREE.Fog;
-    fog.color.copy(hor);
+    this.fogLin.copy(haze);
+    if (low) {
+      // direct render: scene.fog is written straight to the screen, so give it the tone-mapped colour
+      toDisplay(haze, fog.color);
+      const a = toDisplay(this.tmpWarm.copy(haze).add(glow), this.tmpDisp);
+      this.groundUni.uSunGlow.value.setRGB(Math.max(0, a.r - fog.color.r), Math.max(0, a.g - fog.color.g), Math.max(0, a.b - fog.color.b));
+    } else {
+      fog.color.copy(haze);
+      this.groundUni.uSunGlow.value.copy(glow);
+    }
+    this.groundUni.uSunXZ.value.set(this.sunDir.x, this.sunDir.z).normalize();
     fog.near = THREE.MathUtils.lerp(250, 4, st);
     fog.far = THREE.MathUtils.lerp(1500, 75, st);
-    (this.stars.material as THREE.PointsMaterial).opacity = (1 - day) * (1 - st) * 0.9;
+    const far = skyColor(0.12, hcos(Math.PI / 2, 0.12), 0.5, sy, this.tmpFar);
+    this.mountains.update(camPos, {
+      haze, dust, far, day, storm: st, sunXZ: this.groundUni.uSunXZ.value, sunCol, glow,
+      shimmer: low ? 0 : sm(sy, 0.55, 0.9) * (1 - st) * (this.quality === 'high' ? 1 : 0.6), time: this.time, night: 1 - day,
+    });
+
+    (this.stars.material as THREE.PointsMaterial).opacity = nightAmt * (1 - st) * 0.9 * (1 - 0.35 * cover);
     this.moon.intensity = (1 - day) * 0.35;
     this.sun.intensity = 2.6 * day * (1 - st * 0.6);
     this.sun.color.set('#fff0d0').lerp(new THREE.Color('#ff9a50'), dusk);
@@ -533,8 +600,12 @@ export class World {
     };
 
     // road surface (main road, plus the other branch near forks)
+    // every chunk gets its own phase / mirroring of the asphalt texture so cracks and stains don't repeat visibly
+    const uvm = { flip: i % 2 ? -1 : 1, shift: (((i * 2654435761) >>> 0) / 4294967296) * ASPHALT_L };
+    // rolling ground for this stretch (flat y = -0.02 near the road and the stops)
+    add(buildTerrainGeometry(z0, z1, lateral, (x, z) => THREE.MathUtils.smoothstep(zoneDist(x, z), 0, 30)), this.groundMat);
     const surface = (za: number, zb: number, xf: (z: number) => number, y = 0) => {
-      add(ribbon(za, zb, -ROAD_HALF, ROAD_HALF, y, 5, xf), this.mats.asphalt);
+      add(ribbon(za, zb, -ROAD_HALF, ROAD_HALF, y, 5, xf, uvm), this.mats.asphalt);
       add(ribbon(za, zb, -ROAD_HALF - 1.6, -ROAD_HALF, y - 0.005, 5, xf), this.mats.shoulder);
       add(ribbon(za, zb, ROAD_HALF, ROAD_HALF + 1.6, y - 0.005, 5, xf), this.mats.shoulder);
       // edge lines, double-yellow center, dashed white lane dividers
@@ -606,17 +677,18 @@ export class World {
       const [x, zz] = lateral(z, off);
       if (cleared(x, zz) || onRoad(x, zz, 8)) continue;
       const t = r();
-      if (t < 0.25) place.saguaro.push(m4(x, 0, zz, 0.8 + r() * 0.7, r() * 6.28));
-      else if (t < 0.4) place.barrel.push(m4(x, 0, zz, 0.7 + r() * 0.6, r() * 6.28));
-      else if (t < 0.65) place.rock.push(m4(x, 0, zz, 0.4 + r() * 1.8, r() * 6.28));
-      else place.shrub.push(m4(x, 0, zz, 0.6 + r() * 0.9, r() * 6.28));
+      const gy = terrainH(x, zz) - GROUND_Y; // props stand on the (gently rolling) ground; 0 on the flat corridor
+      if (t < 0.25) place.saguaro.push(m4(x, gy, zz, 0.8 + r() * 0.7, r() * 6.28));
+      else if (t < 0.4) place.barrel.push(m4(x, gy, zz, 0.7 + r() * 0.6, r() * 6.28));
+      else if (t < 0.65) place.rock.push(m4(x, gy - 0.05, zz, 0.4 + r() * 1.8, r() * 6.28));
+      else place.shrub.push(m4(x, gy, zz, 0.6 + r() * 0.9, r() * 6.28));
     }
     for (let k = 0; k < 3; k++) {
       const z = z0 - r() * CHUNK;
       const off = (r() < 0.5 ? -1 : 1) * (180 + r() * 450);
       const [x, zz] = lateral(z, off);
       const s = 25 + r() * 45;
-      place.mesa.push(m4(x, 0, zz, s, r() * 6.28, 12 + r() * 30));
+      place.mesa.push(m4(x, terrainH(x, zz) - 1.5, zz, s, r() * 6.28, 12 + r() * 30));
     }
     for (let z = z0 - (i * 7) % 60; z > z1; z -= 60) {
       const [x, zz] = lateral(z, ROAD_HALF + 5);
