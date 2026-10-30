@@ -106,7 +106,7 @@ Lose: clock hits 24:00 · RV destroyed · stranded (no fuel, no money) · arrive
 ## 8. Passenger Jobs
 - **Cooking:** raw → cooked → burnt (>135%) → grease fire. Extinguisher. Plate assembly (patty + bun + cheese). Hand‑feed driver.
 - **Driver survival:** Hunger (hangry red pulse + throttle wobble), Road Hypnosis (vignette + micro‑swerves; cured by coffee/energy drink/slap/horn).
-- **Repairs:** Popped fuse (jolt ≥ 0.8) · overheated radiator (coolant jug) · flat tire (spare + lug wrench) · damage (hammer / duct tape).
+- **Repairs:** Popped fuse (jolt ≥ 0.8, 15% chance, then 120 s with no pops: `SURV.FUSE_CHANCE` / `FUSE_GRACE`) · overheated radiator (coolant jug) · flat tire (spare + lug wrench) · damage (hammer / duct tape).
 
 ## 9. Shared Debit Card Economy
 - One physical card, **$200 start**, lives on the dash tray. Must be **held** to pay. Can be dropped / lost.
@@ -297,7 +297,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 - [x] Sheriff Roscoe: spawns ~25 s after heat > 0, chases with lights + siren, tails; stop the RV → he walks to the driver window → hand him the card = $50 (+$25 per extra heat, +$50 if you fled) and heat resets. Driving off mid-ticket = +2 heat and rams
 - [x] Loan Shark: matte-black spiked muscle car spawns ~12 s after the card goes negative, rams every 8–12 s (speed + yaw kick, jolt, −4 integrity), bullhorn threats; peels off once balance ≥ $0
 - [x] HUD warnings, siren audio, mirror shows pursuers
-- [x] **Outrunning** (`CHASE` in `config.ts`): Roscoe tops out at ~175 mph and the shark at ~170, below the RV's ~198. Stay more than 280 m ahead for 8 s (after a 15 s grace) and you lose them. Losing Roscoe = −1 heat, and he's back in 75 s if heat is still above 0. The shark comes back after 60 s while the card is negative. The mafia Cadillac can't be outrun. Test: `npx tsx scripts/sim-chase.ts`
+- [x] **Outrunning** (`CHASE` in `config.ts`): Roscoe tops out at ~175 mph and the shark at ~170, below the RV's ~198. Stay more than 280 m ahead for 8 s (after a 15 s grace) and you lose them. Losing Roscoe = −1 heat, and he's back in 75 s if heat is still above 0. The shark comes back after 60 s while the card is negative. The mafia Cadillac can't be outrun. Roscoe's "radios for backup" (+1 heat) only happens while he's within 120 m, at most once per chase, so escaping never adds heat. Test: `npx tsx scripts/sim-chase.ts`
 - [x] Fix: cabin acceleration clamped to ~1.3 g and props can only leave through the open door (crashes used to fling everything through the walls)
 - Tests: `npx tsx scripts/sim-phase4.ts`, `npx tsx scripts/sim-containment.ts`
 ### Phase 5 — Route, forks, night, weather, finale, stops  ← **built, needs human playtest**

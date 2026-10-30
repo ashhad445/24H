@@ -60,6 +60,22 @@ function setup() {
   let t = 0; while (s.cop.phase !== 0 && t < 90) { drive(1, 86); t++; }
   check(close && s.cop.phase === 0 && t < 50, `Roscoe on the bumper → lost after ${t} s at 192 mph`);
 }
+// 2c. A long 200 mph escape never adds heat (no backup calls while pulling away)
+{
+  const { s, drive } = setup();
+  s.heat = 2; drive(60, 50);
+  let peak = s.heat;
+  for (let t = 0; t < 90 && s.cop.phase !== 0; t++) { drive(1, 86); peak = Math.max(peak, s.heat); }
+  check(peak === 2 && s.heat === 1, `escape heat: peak ${peak}, end ${s.heat}`);
+}
+// 2d. Fuses: 5 min at ~150 mph pops only a few
+{
+  const { s, drive, toasts } = setup();
+  let pops = 0;
+  for (let t = 0; t < 300; t++) { drive(1, 67); if (s.cab.fuseOut) { pops++; s.cab.fuseOut = false; } }
+  const n = toasts.filter((x) => /Fuse popped/.test(x)).length;
+  check(n <= 3, `fuse pops in 5 min at 150 mph: ${n}`);
+}
 // 3. Loan shark outrun
 {
   const { s, drive } = setup();

@@ -110,6 +110,8 @@ export const SURV = {
   FIRE_AT: 1.6, // cook progress where the grease ignites
   BREW_TIME: 20,
   FUSE_JOLT: 0.8,
+  FUSE_CHANCE: 0.15, // per jolt ≥ FUSE_JOLT
+  FUSE_GRACE: 120, // s with no pop after a fuse pops or gets fixed
 };
 
 /** Health (per player, host). Rates are hp per second. */

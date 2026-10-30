@@ -43,6 +43,8 @@ export class TrafficSim {
   private noLimit = false;
   private wreckT = 0;
   private giggleT = 0;
+  /** Roscoe calls for backup at most once per chase */
+  private backupDone = false;
   /** seconds the active chaser has been left far behind (outrunning) */
   private escape = new Map<number, { age: number; lose: number; warned: boolean }>();
   private rollV = new Map<number, number>(); // wreck id → barrel-roll rate (rad/s)
@@ -451,7 +453,7 @@ export class TrafficSim {
     const R = this.rvRoad();
     const [x, z] = roadPoint(R.z + 480, LANES[0]);
     const npc: NPCState = { id: this.nextId++, k, x, z, yaw: roadYaw(R.z + 480), speed: 60, c: 0, w: 0 };
-    if (k === 'cop') this.copHp = 3;
+    if (k === 'cop') { this.copHp = 3; this.backupDone = false; }
     if (k === 'shark') this.sharkHp = 4;
     this.s.npcs.push(npc);
     return npc;
@@ -498,7 +500,8 @@ export class TrafficSim {
         this.ramCd = 12; this.ram(car, 0.5);
         this.h.toast('🚔 Roscoe bumps the RV! "PULL. OVER."');
       }
-      if (cop.t > 40 && cop.phase === 2 && Math.random() < dt / 45) { s.heat += 1; this.h.toast('🚔 Roscoe radios for backup… (+1 heat)'); }
+      // only while he's on your tail (never while you're pulling away), once per chase
+      if (!this.backupDone && cop.t > 40 && cop.phase === 2 && dist < 120 && Math.random() < dt / 45) { this.backupDone = true; s.heat += 1; this.h.toast('🚔 Roscoe radios for backup… (+1 heat)'); }
     } else if (cop.phase === 3) {
       const [tx, tz] = this.behindRV(10);
       this.drive(car, tx, tz, 8, dt, 0.5);

@@ -51,6 +51,7 @@ export class HostSim implements StopHost {
   private lowHp = new Set<number>();
   /** Seconds of blowout immunity after a flat (so tires don't pop back-to-back). */
   private tireGrace = 60;
+  private fuseGrace = 60;
   /** Rocks left in each roadside pile (chunk index → count). */
   private pileLeft = new Map<number, number>();
 
@@ -313,8 +314,8 @@ export class HostSim implements StopHost {
       // ---------- repairs ----------
       case 'fusebox':
         if (!cab.fuseOut) break;
-        if (held?.k === 'fuse') { this.items.remove(held.id); cab.fuseOut = false; this.sfx('clank'); this.toast('⚡ Power restored'); }
-        else if (held?.k === 'tape' && held.d > 0) { this.useUp(held); cab.fuseOut = false; this.sfx('tape'); this.toast('⚡ Duct tape hack — power restored (sketchy)'); }
+        if (held?.k === 'fuse') { this.items.remove(held.id); cab.fuseOut = false; this.fuseGrace = SURV.FUSE_GRACE; this.sfx('clank'); this.toast('⚡ Power restored'); }
+        else if (held?.k === 'tape' && held.d > 0) { this.useUp(held); cab.fuseOut = false; this.fuseGrace = SURV.FUSE_GRACE; this.sfx('tape'); this.toast('⚡ Duct tape hack — power restored (sketchy)'); }
         break;
       case 'radiator':
         if (held?.k === 'coolant' && held.d > 0) { rv.temp = Math.max(150, rv.temp - 70); this.useUp(held); this.sfx('pour'); this.toast('🌡️ Radiator topped up'); }
@@ -601,8 +602,8 @@ export class HostSim implements StopHost {
     this.items.jolt(mag);
     this.emit({ t: 'ev', k: 'jolt', mag });
     this.s.rv.integrity = Math.max(0, this.s.rv.integrity - mag * 0.6);
-    if (mag >= SURV.FUSE_JOLT && !this.s.cab.fuseOut && Math.random() < 0.4) {
-      this.s.cab.fuseOut = true;
+    if (mag >= SURV.FUSE_JOLT && !this.s.cab.fuseOut && this.fuseGrace <= 0 && Math.random() < SURV.FUSE_CHANCE) {
+      this.s.cab.fuseOut = true; this.fuseGrace = SURV.FUSE_GRACE;
       const f = this.items.spawn('fuse', true, 0.65, 1.8, RV.zRear - 0.25);
       this.items.setVel(f.id, [(Math.random() - 0.5) * 2, 2.5, -2 - Math.random() * 2]);
       this.sfx('pop');
@@ -698,6 +699,7 @@ export class HostSim implements StopHost {
     this.driveT += dt;
     this.hornCd = Math.max(0, this.hornCd - dt);
     this.tireGrace = Math.max(0, this.tireGrace - dt);
+    this.fuseGrace = Math.max(0, this.fuseGrace - dt);
     if (this.driveT > 0.5 || s.seats.driver === -1) this.drive = { th: 0, br: 0, st: 0, horn: false };
     const solo = Object.keys(s.crew).length <= 1 ? SURV.SOLO_EASE : 1;
 
