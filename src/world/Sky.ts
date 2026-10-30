@@ -116,7 +116,7 @@ vec3 scatter(vec3 d){
 
 vec3 twilight(vec3 d){
   float h = max(d.y, 0.0);
-  float side = 0.5 + 0.5 * dot(normalize(d.xz + vec2(1e-5)), normalize(sunDir.xz + vec2(1e-5)));
+  float side = clamp(0.5 + 0.5 * dot(normalize(d.xz + vec2(1e-5)), normalize(sunDir.xz + vec2(1e-5))), 0.0, 1.0); // can round below 0: pow(<0) = NaN on D3D
   float cosT = max(dot(d, sunDir), 0.0);
   float lit = smoothstep(-0.2, 0.03, sunDir.y);
   vec3 hor = mix(vec3(0.5, 0.28, 0.36), vec3(0.95, 0.27, 0.06), pow(side, 1.5));
@@ -175,6 +175,9 @@ void main(){
   // horizon blends into the fog colour so the ground never shows a seam
   float hz = 1.0 - smoothstep(0.0, 0.05, dy);
   col = mix(col, uHaze, hz * hz);
+  // never emit NaN / Inf (bit test: survives the NaN-check optimisations some Windows drivers apply)
+  uvec3 bits = floatBitsToUint(col) & uvec3(0x7f800000u);
+  if (any(equal(bits, uvec3(0x7f800000u)))) col = vec3(0.0);
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

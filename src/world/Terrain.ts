@@ -154,7 +154,7 @@ void main(){
   float n1 = vn(p * 0.00085);
   float n2 = vn(p * 0.0034 + 5.0);
   float rg = 1.0 - abs(2.0 * vn(p * 0.0019 + 11.0) - 1.0);
-  float h = pow(n1, 1.7) * 360.0 + rg * rg * 120.0 + n2 * 50.0 + vn(p * 0.012) * 14.0;
+  float h = pow(max(n1, 0.0), 1.7) * 360.0 + rg * rg * 120.0 + n2 * 50.0 + vn(p * 0.012) * 14.0;
   // mesa terraces in half of the range
   float terr = smoothstep(0.45, 0.6, vn(p * 0.0011 + 23.0));
   float q = h / 46.0; float st = floor(q), fr = fract(q);

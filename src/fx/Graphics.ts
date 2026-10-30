@@ -44,7 +44,9 @@ const SanitizeShader = {
     void main(){
       vec4 c = texture2D(tDiffuse, vUv);
       vec3 v = c.rgb;
-      if (any(isnan(v)) || any(isinf(v))) v = vec3(0.0);
+      // bit test instead of isnan/isinf: Windows (ANGLE/D3D) can optimise those checks away
+      uvec3 bits = floatBitsToUint(v) & uvec3(0x7f800000u);
+      if (any(equal(bits, uvec3(0x7f800000u)))) v = vec3(0.0);
       gl_FragColor = vec4(clamp(v, 0.0, 64.0), 1.0);
     }`,
 };
