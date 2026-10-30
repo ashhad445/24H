@@ -432,6 +432,13 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Train crossing**: bells + flashers when you're ~9 s away, gates drop, a 22–36 car freight train crosses at 22 m/s. The engineer's horn (long-long-short-long, muffled by distance) carries ~2.5 km, so you hear the train before you see it. Train hits the RV = −35. Squeeze across first = "BEAT THE TRAIN". Snapping a gate in front of Roscoe = +1 heat.
   - New sounds: moo, hiss, train horn, scrape, squawk.
   - Dev (`?dev`): **F5** cycles encounter kinds ahead of the RV; `game.enc('train', 300)` forces one at a distance.
+- [x] **Graphics pass** (in progress):
+  - **Headless Blender**: `pip install bpy` (Blender 5.2 as a Python module) into a venv. `BPY_PY=<venv python> scripts/art-build.sh [names]` builds `art/*.py` → `public/models/*.glb` without the Blender app. `art/lib.py` reads `ART_OUT` / `ART_DIR`, so the same scripts still run in Blender via the MCP. `<venv python> art/preview.py <glb> out.png [filter] [cols] [--side|--fast]` renders a Cycles contact sheet for checking a model.
+  - **Quality setting** (`fx/Graphics.ts`, Esc menu → Graphics):
+    - Low: direct render, 1024 shadows, pixel ratio 1.
+    - Medium: half-res bloom + grade, 2048 shadows.
+    - High: full bloom, 4096 shadows, pixel ratio ≤ 2.
+  - **Look**: sky reflections (a PMREM env map baked from the sky dome every 4 s, on at every quality so shaders never change), bloom, a warm color grade, vignette and grain. The composer renders the scene into a half-float target, which uses the same shader variant as the mirrors, so `warm()` still covers it.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
