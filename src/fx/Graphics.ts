@@ -69,17 +69,26 @@ export class Graphics {
     ground.position.y = -2;
     this.envScene.add(ground);
     this.groundMat = ground.material;
-    this.bakeEnv();
+    // `?noenv` turns sky reflections off (diagnostics / weak GPUs). Decided once at boot so shaders never change.
+    this.envOn = !new URLSearchParams(location.search).has('noenv');
+    // The cube + PMREM targets are created once and re-filled on every bake: no GPU allocations or texture swaps
+    // while playing (a fresh target every few seconds made lit surfaces flash black on some drivers).
+    this.cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType, generateMipmaps: false });
+    this.cubeCam = new THREE.CubeCamera(0.1, 400, this.cubeRT);
+    this.envScene.add(this.cubeCam);
+    if (this.envOn) this.bakeEnv();
     scene.environmentIntensity = 0.3;
   }
   private groundMat: THREE.MeshBasicMaterial;
+  private envOn: boolean;
+  private cubeRT: THREE.WebGLCubeRenderTarget;
+  private cubeCam: THREE.CubeCamera;
 
-  /** Re-render the sky into the reflection map (cheap; a few times a minute). */
+  /** Re-render the sky into the reflection map (cheap; a few times a minute). Always the same two targets. */
   private bakeEnv() {
-    const rt = this.pmrem.fromScene(this.envScene, 0.02, 0.1, 400);
-    this.scene.environment = rt.texture;
-    this.envRT?.dispose();
-    this.envRT = rt;
+    this.cubeCam.update(this.renderer, this.envScene);
+    const rt = this.pmrem.fromCubemap(this.cubeRT.texture, this.envRT);
+    if (!this.envRT) { this.envRT = rt; this.scene.environment = rt.texture; }
   }
 
   setQuality(q: Quality) {
@@ -118,7 +127,7 @@ export class Graphics {
   /** Per frame: `night` 0..1 (bloom stronger at night), `storm` 0..1. */
   update(dt: number, night: number, storm: number) {
     this.envT -= dt;
-    if (this.envT <= 0) {
+    if (this.envT <= 0 && this.envOn) {
       this.envT = 4;
       this.groundMat.color.setRGB(0.54, 0.42, 0.28).multiplyScalar(Math.max(0.04, 1 - night * 0.95));
       this.bakeEnv();
