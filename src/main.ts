@@ -92,7 +92,7 @@ sideRT.forEach((rt, i) => {
 
 const input = new Input(canvas);
 const sound = new Sound();
-const settings = setupSettings(sound, input, (q) => { gfx.setQuality(q); fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov); });
+const settings = setupSettings(sound, input, (q) => { gfx.setQuality(q); world.quality = q; fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov); });
 canvas.addEventListener('mousedown', () => { const first = !sound.ctx; sound.init(); if (first) settings.reapply(); });
 const hud = new HUD();
 sound.onCaption = (who, text) => hud.caption(who, text);
@@ -115,7 +115,7 @@ const avatars = new Map<number, Avatar>();
 const raycaster = new THREE.Raycaster();
 raycaster.camera = camera;
 const fx = new Effects(rv, dyn);
-gfx.setQuality(settings.gfx);
+gfx.setQuality(settings.gfx); world.quality = settings.gfx;
 fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov);
 const nozzlePos = new THREE.Vector3(), nozzleDir = new THREE.Vector3();
 

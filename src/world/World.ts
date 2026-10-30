@@ -259,8 +259,8 @@ export class World {
   private groundUni: GroundUniforms;
   private time = 0;
   private cloudOff = new THREE.Vector2(0.37, 0.12);
-  private quality: 'low' | 'medium' | 'high' = 'medium';
-  private qualityT = 0;
+  /** Graphics quality (set from main.ts with the Esc-menu setting); gates the world's own extras. */
+  quality: 'low' | 'medium' | 'high' = 'medium';
   private tmpA = new THREE.Color(); private tmpB = new THREE.Color(); private tmpC = new THREE.Color();
   private tmpNightHor = new THREE.Color(); private tmpDust = new THREE.Color(); private tmpSun = new THREE.Color(); private tmpWarm = new THREE.Color();
   private tmpAmb = new THREE.Color(); private tmpFar = new THREE.Color(); private tmpDisp = new THREE.Color(); private fogLin = new THREE.Color();
@@ -457,22 +457,12 @@ export class World {
     this.time += dt;
     this.cloudOff.x += (0.007 + 0.01 * Math.abs(wind) + 0.03 * storm) * dt;
     this.cloudOff.y += 0.003 * dt;
-    this.qualityT -= dt;
-    if (this.qualityT <= 0) { this.qualityT = 1.5; this.readQuality(); }
 
     this.trail.update(dt, focus, roadDist(focus.x, focus.z) > ROAD_HALF + 1.2, this.daylight, wind, this.quality !== 'low');
     this.applyTime(hour, camPos);
     this.mountains.group.position.set(camPos.x, 0, camPos.z);
     this.sun.position.copy(focus).addScaledVector(this.sunDir, 120);
     this.sun.target.position.copy(focus);
-  }
-
-  /** The Low / Medium / High setting lives in localStorage (ui/Settings.ts); poll it so the world can gate its own extras. */
-  private readQuality() {
-    try {
-      const q = JSON.parse(localStorage.getItem('rr-settings') ?? '{}').gfx;
-      if (q === 'low' || q === 'medium' || q === 'high') this.quality = q;
-    } catch { /* storage blocked: stay on medium */ }
   }
 
   private applyTime(hour: number, camPos: THREE.Vector3) {
