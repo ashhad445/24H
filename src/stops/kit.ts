@@ -2,6 +2,7 @@
 // A stop is a frame (placed beside the road at a mile, on a branch) plus a list of components.
 // Each component contributes colliders, host logic (state/acts/steps/spawns) and client visuals.
 import * as THREE from 'three';
+import * as PT from '../fx/ProcTex';
 import { CFG } from '../config';
 import type { ItemSim } from '../items/ItemPhysics';
 import type { Box2, PromptCtx } from '../rv/RV';
@@ -148,11 +149,11 @@ export const MAT = {
   dirt: new THREE.MeshStandardMaterial({ color: '#9c7a52', roughness: 1 }),
   white: new THREE.MeshStandardMaterial({ color: '#f5f5f5', roughness: 0.6 }),
   dark: new THREE.MeshStandardMaterial({ color: '#2a2a2e', roughness: 0.7 }),
-  steel: new THREE.MeshStandardMaterial({ color: '#9aa0a6', roughness: 0.4, metalness: 0.7 }),
-  wood: new THREE.MeshStandardMaterial({ color: '#8b5a2b', roughness: 0.8 }),
+  steel: PT.applyTex(new THREE.MeshStandardMaterial({ color: '#9aa0a6', metalness: 0.8 }), PT.brushed('#aab0b6', 0.5), { tile: 0.8, normal: 0.6, roughness: 0.9 }),
+  wood: PT.applyTex(new THREE.MeshStandardMaterial({ color: '#8b5a2b' }), PT.wood('dark'), { tile: 1.0, normal: 0.9, roughness: 1 }),
   red: new THREE.MeshStandardMaterial({ color: '#c62828', roughness: 0.5 }),
-  felt: new THREE.MeshStandardMaterial({ color: '#1b5e20', roughness: 1 }),
-  rust: new THREE.MeshStandardMaterial({ color: '#8d4a2a', roughness: 1 }),
+  felt: PT.applyTex(new THREE.MeshStandardMaterial({ color: '#1b5e20' }), PT.felt('#1b5e20'), { tile: 1.2, normal: 0.8, roughness: 1 }),
+  rust: PT.applyTex(new THREE.MeshStandardMaterial({ color: '#8d4a2a' }), PT.rust(), { tile: 1.2, normal: 1, roughness: 1 }),
   glassDark: new THREE.MeshStandardMaterial({ color: '#33414a', roughness: 0.15, metalness: 0.5 }),
 };
 

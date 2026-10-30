@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { PoolLight } from '../fx/LightPool';
 import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
-import { RVPolish } from './RVPolish';
+import { RVPolish, dressRVMaterials } from './RVPolish';
+import { boxGeo } from '../fx/ProcTex';
 import { CHARM2_QUOTES, CHARM_QUOTES } from './charmQuotes';
 import { KINDS, buildItemMesh, itemName } from '../items/Items';
 
@@ -122,7 +123,7 @@ export class RVModel {
   /** smoothed RV-local acceleration (x lateral, z longitudinal) for cabin jolts */
   readonly accelLocal = new THREE.Vector3();
 
-  private M = {
+  private M = dressRVMaterials({
     cream: new THREE.MeshStandardMaterial({ color: '#f4efe6', roughness: 0.7 }),
     orange: new THREE.MeshStandardMaterial({ color: '#f0ad4e', roughness: 0.6 }),
     maroon: new THREE.MeshStandardMaterial({ color: '#d9534f', roughness: 0.6 }),
@@ -142,7 +143,7 @@ export class RVModel {
     amber: new THREE.MeshStandardMaterial({ color: '#ffb300', emissive: '#ff8f00', emissiveIntensity: 0.6 }),
     black: new THREE.MeshStandardMaterial({ color: '#0e0e10', roughness: 0.6 }),
     fuse: new THREE.MeshStandardMaterial({ color: '#ffb300', roughness: 0.5 }),
-  };
+  });
 
   constructor() {
     this.root.add(this.body);
@@ -274,7 +275,7 @@ export class RVModel {
     // ---------- door ----------
     this.door.position.set(halfW - 0.02, floorY, RV.doorZ0);
     const doorW = RV.doorZ1 - RV.doorZ0, doorH = RV.doorTop - floorY;
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.06, doorH, doorW), M.cream);
+    const panel = new THREE.Mesh(boxGeo(0.06, doorH, doorW, M.cream), M.cream);
     panel.position.set(0.0, doorH / 2, doorW / 2); panel.castShadow = true;
     const dwin = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.5), M.glass);
     dwin.rotation.y = Math.PI / 2; dwin.position.set(0.035, 1.55, doorW / 2);
@@ -562,7 +563,7 @@ export class RVModel {
   }
 
   private box(mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, cast = false, receive = true) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
+    const m = new THREE.Mesh(boxGeo(x1 - x0, y1 - y0, z1 - z0, mat), mat);
     m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     m.castShadow = cast; m.receiveShadow = receive;
     this.body.add(m);

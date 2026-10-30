@@ -11,6 +11,7 @@ import { bonk, caught, stepChase } from './chase';
 import { chaserPose, makeBat } from './chaseView';
 import { Assets } from '../core/AssetLoader';
 import { dressBuilding, wallMaterial } from './buildingKit';
+import * as PT from '../fx/ProcTex';
 
 type Rect = { x0: number; x1: number; z0: number; z1: number };
 const rectBox = (r: Rect, top?: number): Box2 => ({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, top });
@@ -21,7 +22,7 @@ export function lot(r: Rect, dirt = false): Component {
   return {
     id: 'lot',
     build(v) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0).rotateX(-Math.PI / 2), dirt ? MAT.dirt : MAT.lot);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0).rotateX(-Math.PI / 2), dirt ? MAT.dirt : PT.surfaceMat(PT.concrete('#ffffff', 0.3), '#5a5652', r.x1 - r.x0, r.z1 - r.z0, 4, { normal: 0.5 }));
       m.position.set((r.x0 + r.x1) / 2, 0.006, (r.z0 + r.z1) / 2); m.receiveShadow = true; v.group.add(m);
     },
   };
@@ -48,15 +49,15 @@ export function building(o: BuildingOpts): Component {
     colliders: () => walls,
     build(v) {
       const kit = Assets.has('buildings');
-      const flat = new THREE.MeshStandardMaterial({ color: o.wall, roughness: 0.9 });
-      const wallMat = (w: Box2, h: number) => kit ? wallMaterial(o.wall, Math.max(w.x1 - w.x0, w.z1 - w.z0), h) : flat;
+      const flat = wallMaterial(o.wall);
+      const wallMat = (_w: Box2, _h: number) => flat;
       for (const w of walls) v.box(wallMat(w, o.h), w.x0, w.x1, 0, o.h, w.z0, w.z1, true);
       v.box(flat, o.x0 - t, o.x0, 2.6, o.h, o.door[0], o.door[1], true);
       if (o.inner) v.box(flat, o.inner.x, o.inner.x + t, 2.4, o.h, o.inner.door[0], o.inner.door[1]);
       // ceiling seen from inside (the kit adds its own roof deck on top)
-      if (kit) v.box(new THREE.MeshStandardMaterial({ color: '#d8d2c4', roughness: 0.9 }), o.x0, o.x1, o.h - 0.02, o.h, o.z0, o.z1);
+      if (kit) v.box(wallMaterial('#d8d2c4'), o.x0, o.x1, o.h - 0.02, o.h, o.z0, o.z1);
       else v.box(new THREE.MeshStandardMaterial({ color: o.roof, roughness: 0.9 }), o.x0 - 0.6, o.x1 + 0.4, o.h, o.h + 0.25, o.z0 - 0.5, o.z1 + 0.5, true);
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(o.x1 - o.x0, o.z1 - o.z0).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: o.floor, roughness: 0.7 }));
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(o.x1 - o.x0, o.z1 - o.z0).rotateX(-Math.PI / 2), PT.surfaceMat(PT.concrete(), o.floor, o.x1 - o.x0, o.z1 - o.z0, 3, { normal: 0.5 }));
       floor.position.set((o.x0 + o.x1) / 2, 0.012, (o.z0 + o.z1) / 2); floor.receiveShadow = true; v.group.add(floor);
       if (kit) dressBuilding(v.group, { ...o }, t);
       // windows either side of the door

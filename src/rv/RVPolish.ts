@@ -2,6 +2,7 @@
 // and wear that follows the RV's integrity (dents, rust, cracked windshield, smoke stains).
 import * as THREE from 'three';
 import { RV } from '../config';
+import * as PT from '../fx/ProcTex';
 
 /** Side mirrors hang off the front of the cab window so the driver can see them. */
 const MZ = -2.78;
@@ -14,6 +15,30 @@ function tex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, 
   return t;
 }
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+
+
+/**
+ * Gives the RV's shared materials their procedural textures (see fx/ProcTex.ts). Must run when the materials are
+ * created, before any mesh is built (box UVs are scaled to meters by `userData.tile`) and before shader warm-up.
+ */
+export function dressRVMaterials<T extends Record<string, THREE.Material>>(M: T): T {
+  const m = M as unknown as Record<string, THREE.MeshStandardMaterial>;
+  PT.applyTex(m.cream, PT.fiberglass('#f4efe6'), { tile: 2.4, normal: 0.3, roughness: 0.78 });
+  PT.applyTex(m.orange, PT.fiberglass('#f0ad4e'), { tile: 2.4, normal: 0.3, roughness: 0.75 });
+  PT.applyTex(m.maroon, PT.fiberglass('#d9534f'), { tile: 2.4, normal: 0.3, roughness: 0.75 });
+  PT.applyTex(m.chrome, PT.chrome(), { tile: 0.7, normal: 0.5, roughness: 0.9, metalness: 1 });
+  PT.applyTex(m.steel, PT.brushed('#9aa0a6', 0.55), { tile: 0.8, normal: 0.6, roughness: 0.9, metalness: 0.8 });
+  PT.applyTex(m.dark, PT.rubber(), { tile: 0.5, normal: 0.8, tint: true });
+  PT.applyTex(m.tire, PT.rubber(), { normal: 1.2, tint: true });
+  PT.applyTex(m.carpet, PT.carpet('#7a5a3c'), { tile: 1.1, normal: 1.0 });
+  PT.applyTex(m.wood, PT.wood('dark'), { tile: 1.0, normal: 0.9, roughness: 1 });
+  PT.applyTex(m.woodLight, PT.wood('light'), { tile: 1.0, normal: 0.9, roughness: 1 });
+  PT.applyTex(m.lining, PT.beadboard('#e8dcc4'), { tile: 1.0, normal: 0.8, roughness: 1 });
+  PT.applyTex(m.seat, PT.vinyl('#8d4a2f', 4, 1), { tile: 0.62, normal: 1.0, roughness: 1 });
+  PT.applyTex(m.cushion, PT.fabric('#c9a66b', '#a67c3d', 8), { tile: 0.5, normal: 0.8, roughness: 1 });
+  PT.applyTex(m.counter, PT.laminate('#e0d2b4'), { tile: 0.8, normal: 0.6, roughness: 1 });
+  return M;
+}
 
 type Mats = Record<string, THREE.MeshStandardMaterial | THREE.Material>;
 
@@ -41,7 +66,6 @@ export class RVPolish {
   private cp2 = { x: 0, z: 0, vx: 0, vz: 0 };
 
   constructor(private body: THREE.Group, private M: Mats) {
-    this.textures();
     this.trim();
     this.curtains();
     this.edges();
@@ -52,70 +76,6 @@ export class RVPolish {
     this.charmHit = this.buildCharm();
     this.charm2Hit = this.buildCharm2();
     this.hull = M.cream as THREE.MeshStandardMaterial;
-  }
-
-  // ---------- textures ----------
-  private textures() {
-    const M = this.M as Record<string, THREE.MeshStandardMaterial>;
-    // wood paneling (dash, cabinets)
-    M.wood.map = tex(256, 256, (g) => {
-      g.fillStyle = '#8b5a2b'; g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 90; i++) {
-        const y = Math.random() * 256;
-        g.strokeStyle = `rgba(${Math.random() < 0.5 ? '60,34,12' : '170,120,70'},${rnd(0.15, 0.4)})`;
-        g.lineWidth = rnd(0.6, 2.4);
-        g.beginPath(); g.moveTo(0, y);
-        g.bezierCurveTo(80, y + rnd(-6, 6), 170, y + rnd(-6, 6), 256, y + rnd(-4, 4)); g.stroke();
-      }
-      for (let i = 0; i < 4; i++) { g.strokeStyle = 'rgba(40,20,8,.5)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(rnd(40, 216), rnd(20, 236), rnd(6, 14), rnd(3, 6), 0, 0, Math.PI * 2); g.stroke(); }
-    });
-    M.wood.color.set('#ffffff');
-    M.woodLight.map = tex(256, 256, (g) => {
-      g.fillStyle = '#c49a6c'; g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 60; i++) { g.strokeStyle = `rgba(120,80,40,${rnd(0.1, 0.3)})`; g.lineWidth = rnd(0.5, 1.6); const y = Math.random() * 256; g.beginPath(); g.moveTo(0, y); g.lineTo(256, y + rnd(-5, 5)); g.stroke(); }
-    });
-    M.woodLight.color.set('#ffffff');
-    // worn shag carpet
-    M.carpet.map = tex(256, 256, (g) => {
-      g.fillStyle = '#7a5a3c'; g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 2600; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '40,28,16' : '150,115,80'},${rnd(0.12, 0.32)})`; g.fillRect(Math.random() * 256, Math.random() * 256, rnd(1, 3), rnd(1, 3)); }
-      for (let i = 0; i < 5; i++) { g.fillStyle = 'rgba(30,20,12,.22)'; g.beginPath(); g.ellipse(Math.random() * 256, Math.random() * 256, rnd(10, 26), rnd(6, 16), Math.random() * 3, 0, Math.PI * 2); g.fill(); } // stains
-    }, [3, 4]);
-    M.carpet.color.set('#ffffff');
-    // vinyl seats: stitched diamonds + a cracked patch
-    M.seat.map = tex(256, 256, (g) => {
-      g.fillStyle = '#8d4a2f'; g.fillRect(0, 0, 256, 256);
-      g.strokeStyle = 'rgba(40,16,8,.5)'; g.lineWidth = 2;
-      for (let i = -256; i < 512; i += 42) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke(); g.beginPath(); g.moveTo(i + 256, 0); g.lineTo(i, 256); g.stroke(); }
-      for (let y = 0; y < 256; y += 42) for (let x = 0; x < 256; x += 42) { g.fillStyle = 'rgba(30,12,6,.65)'; g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
-      g.strokeStyle = 'rgba(210,170,130,.5)'; g.lineWidth = 1; for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(rnd(150, 230), rnd(10, 60)); g.lineTo(rnd(150, 230), rnd(60, 120)); g.stroke(); }
-    });
-    M.seat.color.set('#ffffff');
-    M.cushion.map = tex(128, 128, (g) => {
-      g.fillStyle = '#c9a66b'; g.fillRect(0, 0, 128, 128);
-      for (let y = 0; y < 128; y += 16) { g.fillStyle = y % 32 ? 'rgba(160,100,40,.28)' : 'rgba(255,240,200,.2)'; g.fillRect(0, y, 128, 8); }
-      for (let x = 0; x < 128; x += 16) { g.fillStyle = 'rgba(120,70,30,.12)'; g.fillRect(x, 0, 8, 128); }
-    });
-    M.cushion.color.set('#ffffff');
-    M.counter.map = tex(128, 128, (g) => {
-      g.fillStyle = '#e0d2b4'; g.fillRect(0, 0, 128, 128);
-      for (let i = 0; i < 160; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '120,100,70' : '255,250,235'},${rnd(0.1, 0.35)})`; g.fillRect(Math.random() * 128, Math.random() * 128, rnd(1, 2.5), rnd(1, 2.5)); }
-    });
-    M.counter.color.set('#ffffff');
-    // lining (cabin walls): faint vertical paneling + water stains
-    M.lining.map = tex(256, 256, (g) => {
-      g.fillStyle = '#e8dcc4'; g.fillRect(0, 0, 256, 256);
-      g.strokeStyle = 'rgba(120,100,70,.22)'; g.lineWidth = 1.5; for (let x = 0; x < 256; x += 32) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 256); g.stroke(); }
-      for (let i = 0; i < 3; i++) { const gr = g.createRadialGradient(rnd(40, 216), rnd(20, 60), 2, rnd(40, 216), rnd(20, 60), rnd(30, 60)); gr.addColorStop(0, 'rgba(150,110,60,.28)'); gr.addColorStop(1, 'rgba(150,110,60,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); }
-    });
-    M.lining.color.set('#ffffff');
-    // hull: slightly faded paint
-    (M.cream as THREE.MeshStandardMaterial).roughness = 0.62;
-    (M.cream as THREE.MeshStandardMaterial).map = tex(256, 256, (g) => {
-      g.fillStyle = '#f4efe6'; g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 18; i++) { const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(1, `rgba(120,100,70,${rnd(0.03, 0.08)})`); g.fillStyle = gr; g.fillRect(rnd(0, 256), 0, rnd(6, 24), 256); } // rain streaks
-    });
-    (M.cream as THREE.MeshStandardMaterial).color.set('#ffffff');
   }
 
   // ---------- exterior trim ----------

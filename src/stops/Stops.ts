@@ -4,6 +4,7 @@ import type { PromptCtx } from '../rv/RV';
 import type { ItemState, SharedState } from '../types';
 import { addClearZone } from '../world/World';
 import { warm } from '../fx/ShaderWarm';
+import { boxGeo } from '../fx/ProcTex';
 import { STOPS } from './defs';
 import type { StaticSet } from './geom';
 import { makeHostCtx, signTexture, stopFrame, stopOnRoute, type HostCtx, type StopDef, type ViewCtx } from './kit';
@@ -101,7 +102,7 @@ export class StopsView {
         prompts.set(id, prompt);
       },
       box: (mat, x0, x1, y0, y1, z0, z1, cast = false) => {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
+        const m = new THREE.Mesh(boxGeo(x1 - x0, y1 - y0, z1 - z0, mat), mat);
         m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); m.castShadow = cast; m.receiveShadow = true;
         group.add(m); return m;
       },
