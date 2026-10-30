@@ -1,10 +1,11 @@
 # Shared helpers for the Roadtrip Roulette asset scripts (run inside Blender via the MCP).
 # Author in GAME coordinates: x right, y up, z back (−Z is forward). G(x, y, z) converts to Blender (Z up).
 # glTF export converts Blender back to +Y up, so a model built here lands in Three.js exactly as written.
-import bpy, bmesh, math, random
+import bpy, bmesh, math, os, random
 from mathutils import Vector, Matrix, Euler
 
-OUT = r'E:\24H\public\models'
+# ART_OUT / ART_DIR let the same scripts run headless (scripts/art-build.sh, pip `bpy`) or in Blender via the MCP
+OUT = os.environ.get('ART_OUT', r'E:\24H\public\models')
 
 
 def G(x, y, z):
