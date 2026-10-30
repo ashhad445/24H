@@ -1,10 +1,11 @@
 // Lucky Scorpion Diner extras: the room dressing, regulars, the parking lot, and the Scorpion Challenge.
 // Stop-local coords: +X away from the road. The diner box is x 20..36, z −10..8; the counter runs x 27–28.
 import * as THREE from 'three';
+import * as PT from '../fx/ProcTex';
 import { PoolLight } from '../fx/LightPool';
 import type { Box2 } from '../rv/RV';
 import { makeNpc } from '../models/npcs';
-import { MAT, canvasTex, type Component } from './kit';
+import { MAT, type Component } from './kit';
 
 const BOOTHS: [number, number][] = [[-8.6, -7], [-5.4, -3.8], [2.4, 4]]; // table z ranges (x 20.3–21.6)
 const STOOLS = [-4.4, -3.2, -2.0, -0.8, 0.4, 1.6, 2.8];
@@ -34,13 +35,11 @@ export function dinerDecor(id: string): Component {
     build(v) {
       const g = v.group;
       // checkered floor in the customer half
-      const check = canvasTex(256, 256, (c) => { for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { c.fillStyle = (i + j) % 2 ? '#111' : '#f5f5f5'; c.fillRect(i * 32, j * 32, 32, 32); } });
-      check.wrapS = check.wrapT = THREE.RepeatWrapping; check.repeat.set(7 / 2, 18 / 2);
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(7, 18).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: check, roughness: 0.4 }));
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(7, 18).rotateX(-Math.PI / 2), PT.surfaceMat(PT.tile('#f5f5f5', '#161616', 8), '#ffffff', 7, 18, 2.0));
       floor.position.set(23.5, 0.016, -1); floor.receiveShadow = true; g.add(floor);
 
       // booths: red vinyl benches, plates, ketchup, napkins
-      const vinyl = new THREE.MeshStandardMaterial({ color: '#c62828', roughness: 0.35 });
+      const vinyl = PT.applyTex(new THREE.MeshStandardMaterial({ color: '#c62828' }), PT.vinyl('#c62828', 4, 0.5), { tile: 0.6, normal: 1 });
       for (const [z0, z1] of BOOTHS) {
         // seat + backrest on the side away from the table
         v.box(vinyl, 20.1, 21.8, 0, 0.45, z0 - 0.75, z0 - 0.15, true); v.box(vinyl, 20.1, 21.8, 0.45, 1.1, z0 - 0.75, z0 - 0.55, true);

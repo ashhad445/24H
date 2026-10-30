@@ -2,6 +2,7 @@
 // the gamblers who never leave, and a bouncer who doesn't like winners.
 // Stop-local coords: casino box x 18..44, z −18..18, door on the x = 18 wall.
 import * as THREE from 'three';
+import * as PT from '../fx/ProcTex';
 import { PoolLight } from '../fx/LightPool';
 import { makeNpc } from '../models/npcs';
 import { bonk, type ChaseHost } from './chase';
@@ -336,7 +337,7 @@ export function casinoDecor(id: string): Component {
         for (let i = 0; i < 40; i++) { c.strokeStyle = ['#ffb300', '#00bcd4', '#e91e63', '#7cb342'][i % 4]; c.lineWidth = 3; c.beginPath(); c.arc(Math.random() * 256, Math.random() * 256, 8 + Math.random() * 20, 0, Math.PI * (0.5 + Math.random())); c.stroke(); }
       });
       carpet.wrapS = carpet.wrapT = THREE.RepeatWrapping; carpet.repeat.set(6, 8);
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(26, 36).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: carpet, roughness: 1 }));
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(26, 36).rotateX(-Math.PI / 2), (() => { const m = new THREE.MeshStandardMaterial({ map: carpet, roughness: 1, normalMap: PT.repeated(PT.carpet('#ffffff'), 12, 16).normalMap }); m.normalScale.set(0.9, 0.9); return m; })());
       floor.position.set(31, 0.016, 0); floor.receiveShadow = true; g.add(floor);
       // chandeliers
       const crystal = new THREE.MeshStandardMaterial({ color: '#fffde7', emissive: '#ffe082', emissiveIntensity: 0.8, transparent: true, opacity: 0.85 });

@@ -1,4 +1,6 @@
 // Client-side meshes, interactables and animation for Rusty's Oasis.
+import { boxGeo } from '../fx/ProcTex';
+import * as PT from '../fx/ProcTex';
 import * as THREE from 'three';
 import { PoolLight } from '../fx/LightPool';
 import { makeNpc } from '../models/npcs';
@@ -45,6 +47,18 @@ const carPrompt = (i: number) => (s: SharedState, c: { held: string }) => {
   return car.parts > 0 ? `Strip the ${['battery', 'catalytic converter', 'wheel'][3 - car.parts]} (sell it to Vinnie out back)` : 'A stripped shell';
 };
 
+function dressRusty<T extends Record<string, THREE.MeshStandardMaterial>>(M: T): T {
+  PT.applyTex(M.wall, PT.stucco(), { tile: 2.5, normal: 0.5, tint: true });
+  PT.applyTex(M.roof, PT.corrugated('#8a8e92', 0.9), { tile: 2.0, normal: 0.8, tint: true, roughness: 1 });
+  PT.applyTex(M.steel, PT.brushed('#aab0b6', 0.5), { tile: 0.8, normal: 0.6, roughness: 0.9 });
+  PT.applyTex(M.wood, PT.wood('dark'), { tile: 1.0, normal: 0.9, roughness: 1 });
+  PT.applyTex(M.felt, PT.felt('#1b5e20'), { tile: 1.2, normal: 0.8, roughness: 1 });
+  PT.applyTex(M.white, PT.paintedMetal('#f5f5f5', 0.5), { tile: 2.0, normal: 0.8, roughness: 0.9 });
+  PT.applyTex(M.red, PT.paintedMetal('#c62828', 0.9), { tile: 1.5, normal: 0.8, roughness: 0.9 });
+  PT.applyTex(M.tire, PT.rubber(), { normal: 1.2, tint: true });
+  return M;
+}
+
 export class RustyView {
   readonly group = new THREE.Group();
   private prompts = new Map<string, Prompt>();
@@ -59,7 +73,7 @@ export class RustyView {
   private crabs: THREE.Group[] = [];
   private sedan = new THREE.Group();
   private splats: THREE.Mesh[] = [];
-  private M = {
+  private M = dressRusty({
     lot: new THREE.MeshStandardMaterial({ color: '#4a4642', roughness: 1 }),
     paint: new THREE.MeshStandardMaterial({ color: '#f2f0e6', roughness: 0.8 }),
     wall: new THREE.MeshStandardMaterial({ color: '#e9c48a', roughness: 0.9 }),
@@ -74,7 +88,7 @@ export class RustyView {
     tire: new THREE.MeshStandardMaterial({ color: '#151515', roughness: 0.9 }),
     glass: new THREE.MeshStandardMaterial({ color: '#9fc6d6', roughness: 0.1, transparent: true, opacity: 0.35 }),
     hose: new THREE.MeshStandardMaterial({ color: '#111', roughness: 0.6 }),
-  };
+  });
 
   constructor(scene: THREE.Scene) {
     const g = this.group, M = this.M;
@@ -83,7 +97,7 @@ export class RustyView {
     scene.add(g);
 
     // lot + parking stripes
-    const lot = new THREE.Mesh(new THREE.PlaneGeometry(LOT.x1 - LOT.x0, LOT.z1 - LOT.z0).rotateX(-Math.PI / 2), M.lot);
+    const lot = new THREE.Mesh(new THREE.PlaneGeometry(LOT.x1 - LOT.x0, LOT.z1 - LOT.z0).rotateX(-Math.PI / 2), PT.surfaceMat(PT.concrete('#ffffff', 0.3), '#58534e', LOT.x1 - LOT.x0, LOT.z1 - LOT.z0, 4, { normal: 0.5 }));
     lot.position.set((LOT.x0 + LOT.x1) / 2, 0.006, (LOT.z0 + LOT.z1) / 2); lot.receiveShadow = true; g.add(lot);
     for (let i = 0; i < 6; i++) this.box(M.paint, 54 + i * 0, 58, 0.008, 0.012, -38 + i * 3.2, -37.9 + i * 3.2);
 
@@ -133,12 +147,11 @@ export class RustyView {
     this.box(M.wall, S.x0 - wt, S.x0, 2.6, S.h, S.doorZ0, S.doorZ1, true); // over the door
     this.box(M.wall, S.innerX, S.innerX + wt, 2.4, S.h, S.innerDoorZ0, S.innerDoorZ1);
     const roofSlab = this.box(M.roof, S.x0 - 0.6, S.x1 + 0.4, S.h, S.h + 0.25, S.z0 - 0.5, S.z1 + 0.5, true);
-    const wainscot = this.box(M.trim, S.x0 - 0.25, S.x0 - 0.2, 0, 0.6, S.z0, S.z1); // wainscot
+    const brickM = PT.applyTex(new THREE.MeshStandardMaterial({ color: '#b5653e' }), PT.brick('#b5653e'), { tile: 1.0, normal: 1.2, roughness: 1 });
+    const wainscot = this.box(brickM, S.x0 - 0.25, S.x0 - 0.2, 0, 0.6, S.z0, S.z1); // wainscot
     // front windows (glass in a frame) either side of the door
     const panes = [[-10, -5], [1.5, 6]].map(([z0, z1]) => this.glassPane(S.x0 - wt - 0.01, 1.2, 2.3, z0, z1));
-    const floorTex = canvasTex(128, 128, (c) => { for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { c.fillStyle = (i + j) % 2 ? '#d9d2c3' : '#6d4c41'; c.fillRect(i * 16, j * 16, 16, 16); } });
-    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(8, 10);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(S.x1 - S.x0, S.z1 - S.z0).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 }));
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(S.x1 - S.x0, S.z1 - S.z0).rotateX(-Math.PI / 2), PT.surfaceMat(PT.tile('#d9d2c3', '#6d4c41', 8), '#ffffff', S.x1 - S.x0, S.z1 - S.z0, 2.0));
     floor.position.set((S.x0 + S.x1) / 2, 0.012, (S.z0 + S.z1) / 2); floor.receiveShadow = true; g.add(floor);
     const storeSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.1), new THREE.MeshBasicMaterial({ map: signTex([['GENERAL STORE', 70, '#3b1f0e'], ['ICE · BAIT · BEER · PARTS', 34, '#7a2a1a']], '#f0ad4e') }));
     storeSign.position.set(S.x0 - wt - 0.02, 3.2, -2); storeSign.rotation.y = -Math.PI / 2; g.add(storeSign);
@@ -286,7 +299,7 @@ export class RustyView {
   }
 
   private box(mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, cast = false) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
+    const m = new THREE.Mesh(boxGeo(x1 - x0, y1 - y0, z1 - z0, mat), mat);
     m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     m.castShadow = cast; m.receiveShadow = true;
     this.group.add(m);

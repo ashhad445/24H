@@ -3,6 +3,7 @@
 // and roof clutter. Pure visuals: colliders and the door gap stay exactly where building() puts them.
 import * as THREE from 'three';
 import { Assets } from '../core/AssetLoader';
+import * as PT from '../fx/ProcTex';
 
 export interface KitOpts {
   x0: number; x1: number; z0: number; z1: number; h: number; door: [number, number];
@@ -16,37 +17,12 @@ export interface KitOpts {
   portal?: boolean;
 }
 
-let stucco: THREE.CanvasTexture | null = null;
-/** Pale speckled plaster with a dusty base; multiplied by the wall color. */
-export function stuccoTexture() {
-  if (stucco) return stucco;
-  const c = document.createElement('canvas'); c.width = c.height = 256;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 2600; i++) {
-    const v = 215 + Math.floor(Math.random() * 40);
-    g.fillStyle = `rgb(${v},${v},${v})`;
-    g.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 3, 1 + Math.random() * 3);
-  }
-  // a couple of hairline cracks
-  g.strokeStyle = 'rgba(90,80,70,0.35)'; g.lineWidth = 1;
-  for (let k = 0; k < 3; k++) {
-    let x = Math.random() * 256, y = Math.random() * 256; g.beginPath(); g.moveTo(x, y);
-    for (let s = 0; s < 6; s++) { x += (Math.random() - 0.5) * 30; y += Math.random() * 18; g.lineTo(x, y); }
-    g.stroke();
-  }
-  stucco = new THREE.CanvasTexture(c);
-  stucco.wrapS = stucco.wrapT = THREE.RepeatWrapping;
-  stucco.colorSpace = THREE.SRGBColorSpace;
-  return stucco;
-}
-
-/** A wall material with the plaster texture tiled every ~2.5 m. */
-export function wallMaterial(color: string, len: number, h: number) {
-  const t = stuccoTexture().clone();
-  t.repeat.set(Math.max(1, len / 2.5), Math.max(1, h / 2.5));
-  t.needsUpdate = true;
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.92, map: t });
+const wallMats = new Map<string, THREE.MeshStandardMaterial>();
+/** Plaster wall material (procedural stucco + normal map, 2.5 m tile) shared per colour. Use with boxGeo / v.box. */
+export function wallMaterial(color: string, _len?: number, _h?: number) {
+  let m = wallMats.get(color);
+  if (!m) { m = PT.applyTex(new THREE.MeshStandardMaterial({ color, roughness: 1 }), PT.stucco(), { tile: 2.5, normal: 0.5, tint: true }); wallMats.set(color, m); }
+  return m;
 }
 
 const shade = (hex: string, k: number) => '#' + new THREE.Color(hex).multiplyScalar(k).getHexString();
