@@ -4,7 +4,7 @@ import { Character, type CharOpts } from './Character';
 
 export type NpcId = 'cletus' | 'roscoe' | 'flo' | 'earl' | 'dusty' | 'bouncer' | 'generic';
 
-const CAST: Record<NpcId, CharOpts> = {
+export const CAST: Record<NpcId, CharOpts> = {
   // Rusty's clerk: lanky old farmer, overalls, big white beard, straw-colored cowboy hat
   cletus: { kind: 'human', body: '#3f5a8a', pants: '#2f4770', hat: 'cowboy', hatColor: '#c9a66b', beard: '#eeeeee', skin: '#d9a066', belly: 1.12, pose: 'read', vest: '#2f4770' },
   // Sheriff: tan uniform, aviators, mustache, badge, clipboard
