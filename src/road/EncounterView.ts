@@ -2,6 +2,7 @@
 // confetti, the road work zone, the railroad crossing + train, tumbleweeds, and the riders in the RV.
 import * as THREE from 'three';
 import { RV } from '../config';
+import { Assets } from '../core/AssetLoader';
 import { warm } from '../fx/ShaderWarm';
 import { itemName } from '../items/Items';
 import { Character, type CharOpts } from '../models/Character';
@@ -361,6 +362,7 @@ export class EncounterView {
     for (let i = 0; i < 4; i++) g.add(buildTrainCar(i, i === 0));
     g.add(buildSign([['X', 40, '#111']], '#ffd600', 'diamond'));
     for (const o of OUTFITS) g.add(new Character({ kind: 'human', ...o }).root);
+    if (!Assets.ready) Assets.onReady(() => void warm(EncounterView.samples())); // glb models landed late: compile them before they show
     return g;
   }
 }
