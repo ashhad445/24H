@@ -1,6 +1,7 @@
 // Procedural meshes for road encounters: cows, the ostrich, cones, road signs, the crossing and the train.
 // Everything faces −Z (like the RV) unless noted.
 import * as THREE from 'three';
+import { Assets, tint } from '../core/AssetLoader';
 import { PoolLight } from '../fx/LightPool';
 import { canvasTex } from '../stops/kit';
 import { TRAIN } from './kinds/train';
@@ -23,7 +24,31 @@ const box = (w: number, h: number, l: number) => new THREE.BoxGeometry(w, h, l);
 // ------------------------------------------------------------------ animals
 export interface Legged { g: THREE.Group; legs: THREE.Object3D[]; head?: THREE.Object3D }
 
+const COATS: [string, string][] = [['#f2efe9', '#262321'], ['#f2efe9', '#6d4c41'], ['#9a6a45', '#f2efe9'], ['#d7ccc8', '#3e2723'], ['#f2efe9', '#262321']];
+
+/** Cow from animals.glb (three patch layouts x coat colors); null until it is loaded. */
+function glbCow(spots: number): Legged | null {
+  const k = Math.floor(Math.abs(spots) * 97);
+  const body = Assets.node('animals', `cow_body_${k % 3}`);
+  const headN = Assets.node('animals', 'cow_head');
+  if (!body || !headN) return null;
+  const [hide, patch] = COATS[Math.floor(k / 3) % COATS.length];
+  const colors = { hide, patch };
+  tint(body, colors); tint(headN, colors);
+  const g = new THREE.Group(); g.add(body);
+  headN.position.set(0, 1.25, -0.95); g.add(headN);
+  const legs: THREE.Object3D[] = [];
+  for (const [x, z] of [[-0.28, -0.6], [0.28, -0.6], [-0.28, 0.6], [0.28, 0.6]]) {
+    const l = Assets.node('animals', z < 0 ? 'cow_legF' : 'cow_legB');
+    if (!l) return null;
+    tint(l, colors); l.position.set(x, 0.72, z); g.add(l); legs.push(l);
+  }
+  return { g, legs, head: headN };
+}
+
 export function buildCow(spots = Math.random()): Legged {
+  const glb = glbCow(spots);
+  if (glb) return glb;
   const g = new THREE.Group();
   const body = mesh(box(0.85, 0.75, 1.7), M.cowW, 0, 1.05, 0, g);
   // a few black patches
@@ -52,7 +77,25 @@ export function buildCow(spots = Math.random()): Legged {
   return { g, legs, head };
 }
 
+function glbOstrich(): Legged | null {
+  const body = Assets.node('animals', 'ostrich_body'), neck = Assets.node('animals', 'ostrich_neck');
+  if (!body || !neck) return null;
+  const colors = { feather: '#2b2a2e', plume: '#f5f5f0', skin: '#d9a3a0' };
+  tint(body, colors); tint(neck, colors);
+  const g = new THREE.Group(); g.add(body);
+  neck.position.set(0, 1.45, -0.32); g.add(neck);
+  const legs: THREE.Object3D[] = [];
+  for (const x of [-0.14, 0.14]) {
+    const l = Assets.node('animals', 'ostrich_leg');
+    if (!l) return null;
+    tint(l, colors); l.position.set(x, 1.0, 0.05); g.add(l); legs.push(l);
+  }
+  return { g, legs, head: neck };
+}
+
 export function buildOstrich(): Legged {
+  const glb = glbOstrich();
+  if (glb) return glb;
   const g = new THREE.Group();
   const body = mesh(new THREE.SphereGeometry(0.45, 12, 9), M.ostB, 0, 1.25, 0, g); body.scale.set(0.85, 0.75, 1.15);
   const tail = mesh(new THREE.SphereGeometry(0.25, 8, 6), M.ostW, 0, 1.35, 0.45, g); tail.scale.set(1, 0.7, 0.8);
@@ -82,6 +125,8 @@ export function stride(a: Legged, phase: number, amount: number) {
 // ------------------------------------------------------------------ road furniture
 export function buildCone(): THREE.Group {
   const g = new THREE.Group();
+  const c = Assets.node('animals', 'prop_cone');
+  if (c) { tint(c, { cone: '#ff6d00' }); g.add(c); return g; }
   mesh(box(0.42, 0.04, 0.42), M.coneBase, 0, 0.02, 0, g);
   mesh(new THREE.ConeGeometry(0.17, 0.72, 12), M.cone, 0, 0.4, 0, g);
   mesh(new THREE.CylinderGeometry(0.095, 0.12, 0.1, 12, 1, true), M.coneW, 0, 0.42, 0, g, false);
@@ -144,28 +189,50 @@ export function buildArrowBoard(): { g: THREE.Group; lamp: THREE.MeshStandardMat
 /** Crossing signal for one side: post, crossbuck, two flashers, a gate arm that swings down over `armLen` m. Arm points toward −x. */
 export function buildSignal(armLen: number): { g: THREE.Group; arm: THREE.Group; lamps: THREE.MeshStandardMaterial[] } {
   const g = new THREE.Group();
-  mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.2, 8), M.post, 0, 2.1, 0, g);
+  const post = Assets.node('vehicles', 'signal_post');
   const xTex = canvasTex(256, 48, (c) => { c.fillStyle = '#fff'; c.fillRect(0, 0, 256, 48); c.strokeStyle = '#111'; c.lineWidth = 6; c.strokeRect(2, 2, 252, 44); c.fillStyle = '#111'; c.font = '900 30px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('RAILROAD', 128, 26); });
-  for (const r of [0.6, -0.6]) {
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.28), new THREE.MeshStandardMaterial({ map: xTex, side: THREE.DoubleSide, roughness: 0.5 }));
-    b.position.set(0, 3.9, 0.12); b.rotation.z = r; g.add(b);
-  }
-  mesh(box(1.4, 0.08, 0.08), M.black, 0, 3.1, 0.1, g);
   const lamps: THREE.MeshStandardMaterial[] = [];
-  for (const s of [-1, 1]) {
-    const lamp = std('#4a0000', { emissive: '#ff1a1a', emissiveIntensity: 0 });
-    mesh(new THREE.CircleGeometry(0.22, 14), M.black, s * 0.55, 3.1, 0.12, g, false);
-    mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 14).rotateX(Math.PI / 2), lamp, s * 0.55, 3.1, 0.18, g, false);
-    lamps.push(lamp);
+  if (post) {
+    // Blender model: post, crossbuck blades, flasher hoods, signal box. The RAILROAD lettering and live lamps stay in code.
+    g.add(post);
+    const own: Record<string, THREE.MeshStandardMaterial> = {};
+    post.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const swap = (mt: THREE.Material) => {
+        if (mt.name !== 'lampA' && mt.name !== 'lampB') return mt;
+        return (own[mt.name] ??= Object.assign((mt as THREE.MeshStandardMaterial).clone(), { emissive: new THREE.Color('#ff1a1a'), emissiveIntensity: 0 }));
+      };
+      m.material = Array.isArray(m.material) ? m.material.map(swap) : swap(m.material);
+    });
+    lamps.push(own.lampA ?? std('#4a0000'), own.lampB ?? std('#4a0000'));
+    for (const r of [0.6, -0.6]) {
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(1.46, 0.25), new THREE.MeshStandardMaterial({ map: xTex, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -1 }));
+      b.position.set(0, 3.9, 0.176); b.rotation.z = r; g.add(b);
+    }
+  } else {
+    mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.2, 8), M.post, 0, 2.1, 0, g);
+    for (const r of [0.6, -0.6]) {
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.28), new THREE.MeshStandardMaterial({ map: xTex, side: THREE.DoubleSide, roughness: 0.5 }));
+      b.position.set(0, 3.9, 0.12); b.rotation.z = r; g.add(b);
+    }
+    mesh(box(1.4, 0.08, 0.08), M.black, 0, 3.1, 0.1, g);
+    for (const s of [-1, 1]) {
+      const lamp = std('#4a0000', { emissive: '#ff1a1a', emissiveIntensity: 0 });
+      mesh(new THREE.CircleGeometry(0.22, 14), M.black, s * 0.55, 3.1, 0.12, g, false);
+      mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 14).rotateX(Math.PI / 2), lamp, s * 0.55, 3.1, 0.18, g, false);
+      lamps.push(lamp);
+    }
+    mesh(box(0.5, 0.8, 0.4), M.steel, 0, 0.4, 0, g); // signal box
   }
-  mesh(box(0.5, 0.8, 0.4), M.steel, 0, 0.4, 0, g); // signal box
   // gate arm: striped, pivoting at the post
   const arm = new THREE.Group(); arm.position.set(-0.15, 1.15, 0.25); g.add(arm);
   const stripes = canvasTex(256, 16, (c) => { for (let i = 0; i < 8; i++) { c.fillStyle = i % 2 ? '#fff' : '#d50000'; c.fillRect(i * 32, 0, 32, 16); } });
   stripes.wrapS = THREE.RepeatWrapping; stripes.repeat.set(armLen / 4, 1);
   const bar = new THREE.Mesh(new THREE.BoxGeometry(armLen, 0.12, 0.08), new THREE.MeshStandardMaterial({ map: stripes, roughness: 0.6 }));
   bar.position.x = -armLen / 2; bar.castShadow = true; arm.add(bar);
-  mesh(box(0.5, 0.3, 0.3), M.black, 0.3, 0, 0, arm); // counterweight
+  const cw = Assets.node('vehicles', 'signal_gate');
+  if (cw) arm.add(cw); else mesh(box(0.5, 0.3, 0.3), M.black, 0.3, 0, 0, arm); // counterweight
   return { g, arm, lamps };
 }
 
@@ -196,7 +263,26 @@ export function buildTrack(half: number, roadHalf: number): THREE.Group {
 const CAR_COLORS = ['#8d3b2a', '#5d4037', '#37474f', '#1b5e20', '#6d6a64', '#9e5b2f', '#283593'];
 
 /** One train car (or the locomotive), length along local x, nose toward +x. */
+function glbTrainCar(i: number, loco: boolean): THREE.Group | null {
+  const n = Assets.node('vehicles', 'train_' + (loco ? 'loco' : ['box', 'tank', 'hopper', 'box'][i % 4]));
+  if (!n) return null;
+  tint(n, loco ? { loco: '#f9a825' } : { body: CAR_COLORS[i % CAR_COLORS.length], tank: i % 2 ? '#212121' : '#eceff1' });
+  const g = new THREE.Group(); g.add(n);
+  if (loco) {
+    n.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const glow = (mt: THREE.Material) => mt.name === 'head' ? Object.assign((mt as THREE.MeshStandardMaterial).clone(), { emissive: new THREE.Color('#fff3c0'), emissiveIntensity: 2.5 }) : mt;
+      m.material = Array.isArray(m.material) ? m.material.map(glow) : glow(m.material);
+    });
+    const light = new PoolLight('#fff3c0', 30, 60, 1.2); light.position.set(TRAIN.loco / 2 + 2, 2.5, 0); g.add(light);
+  }
+  return g;
+}
+
 export function buildTrainCar(i: number, loco: boolean): THREE.Group {
+  const glb = glbTrainCar(i, loco);
+  if (glb) return glb;
   const g = new THREE.Group();
   const len = loco ? TRAIN.loco : TRAIN.car;
   const w = TRAIN.halfW * 2;

@@ -1,6 +1,8 @@
 // Client rendering of NPC vehicles, Roscoe on foot, flashing lights and the siren.
 import * as THREE from 'three';
+import { Assets, tint } from '../core/AssetLoader';
 import { PoolLight } from '../fx/LightPool';
+import { warm } from '../fx/ShaderWarm';
 import { makeNpc } from '../models/npcs';
 import type { RVModel } from '../rv/RV';
 import { chaserPose } from '../stops/chaseView';
@@ -55,6 +57,83 @@ function driver(g: THREE.Object3D, x: number, y: number, z: number, hat?: string
   g.add(d);
 }
 
+// ---------------------------------------------------------------- Blender models (public/models/vehicles.glb)
+// Used as soon as the glb is loaded; the procedural builders below are the fallback.
+const GLB_BODY: Record<NPCState['k'], string> = { sedan: 'car_sedan', cop: 'car_cop', pickup: 'car_pickup', bandit: 'car_bandit', camper: 'car_camper', semi: 'car_semi', shark: 'car_shark' };
+/** wheel node, radius, width per kind (matches WHEELS in art/vehicles.py) */
+const GLB_WHEEL: Record<NPCState['k'], [string, number, number]> = {
+  sedan: ['wheel_car', 0.34, 0.26], cop: ['wheel_car', 0.34, 0.26], pickup: ['wheel_truck', 0.4, 0.3], bandit: ['wheel_truck', 0.4, 0.3],
+  camper: ['wheel_truck', 0.4, 0.3], shark: ['wheel_muscle', 0.37, 0.3], semi: ['wheel_semi', 0.5, 0.36],
+};
+/** where the driver's torso sits (x is mirrored for the passenger seat) and the hat he wears */
+const GLB_DRIVER: Record<NPCState['k'], { p: [number, number, number]; hat?: string; scale?: number }> = {
+  sedan: { p: [-0.45, 0.82, 0.3] }, cop: { p: [-0.475, 0.82, 0.33], hat: 'dhat_cowboy' }, pickup: { p: [-0.45, 1.1, 0.4], hat: 'dhat_cap' },
+  bandit: { p: [-0.45, 1.1, 0.4], hat: 'dhat_cap' }, camper: { p: [-0.575, 1.25, -1.8], hat: 'dhat_cap' }, shark: { p: [-0.45, 0.82, 0.95], scale: 0.85 },
+  semi: { p: [-0.5625, 1.85, -2.3], hat: 'dhat_cap' },
+};
+const TRAILERS = ['#e8eaed', '#f5f5f5', '#cfd8dc', '#ffe0b2', '#c5e1a5', '#b3e5fc'];
+const SHIRTS = ['#546e7a', '#8d6e63', '#5c6bc0', '#7cb342', '#ef6c00', '#455a64'];
+const SKINS = ['#d9a066', '#c68642', '#f1c27d', '#8d5524', '#e0ac69'];
+const HAT_COLORS: Partial<Record<NPCState['k'], string>> = { cop: '#5d4037', pickup: '#a1887f', bandit: '#b71c1c', camper: '#ffd54f', semi: '#c62828' };
+const LIGHT_MATS = ['head', 'tail', 'sigL', 'sigR', 'lbRed', 'lbBlue'];
+
+/** Fresh copy of a vehicle body with this vehicle's own light materials wired into `v`; null if the model isn't loaded. */
+function glbVehicle(v: View, k: NPCState['k'], c: number, paintC: string): THREE.Object3D | null {
+  const body = Assets.node('vehicles', GLB_BODY[k]);
+  if (!body) return null;
+  tint(body, { paint: paintC, trim: '#f5f5f5', trailer: TRAILERS[c % TRAILERS.length] });
+  const own = new Map<string, THREE.MeshStandardMaterial>();
+  const mine = (m: THREE.Material): THREE.Material => {
+    const base = m as THREE.MeshStandardMaterial;
+    if (!LIGHT_MATS.includes(base.name)) return m;
+    let x = own.get(base.name);
+    if (!x) { x = base.clone(); own.set(base.name, x); }
+    return x;
+  };
+  body.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.material = Array.isArray(m.material) ? m.material.map(mine) : mine(m.material);
+  });
+  const glow = (name: string, color: string, i: number) => {
+    const x = own.get(name) ?? new THREE.MeshStandardMaterial({ color });
+    x.emissive.set(color); x.emissiveIntensity = i; return x;
+  };
+  v.heads = glow('head', '#fff3c0', 0.2);
+  v.tail = glow('tail', '#ff1a1a', 0.35);
+  v.sigL = glow('sigL', '#ffa000', 0);
+  v.sigR = glow('sigR', '#ffa000', 0);
+  if (k === 'cop') { v.red = glow('lbRed', '#ff1a1a', 0); v.blue = glow('lbBlue', '#2962ff', 0); }
+  return body;
+}
+
+function glbWheels(v: View, g: THREE.Object3D, k: NPCState['k'], hw: number, axles: number[]) {
+  const [node, r, wd] = GLB_WHEEL[k];
+  v.wheelR = r;
+  const add = (x: number, z: number) => {
+    const m = Assets.node('vehicles', node);
+    if (!m) return;
+    const w = new THREE.Group(); w.position.set(x, r, z);
+    if (x < 0) m.rotation.y = Math.PI; // rim faces outward on the left side too
+    w.add(m); g.add(w); v.wheels.push(w);
+  };
+  for (const z of axles) for (const s of [-1, 1]) {
+    add(s * (hw - 0.05), z);
+    if (k === 'semi' && z > 0) add(s * (hw - 0.05 - wd - 0.02), z); // dual rear tires
+  }
+}
+
+function glbDriver(g: THREE.Object3D, k: NPCState['k'], c: number, mirror = false) {
+  const spec = GLB_DRIVER[k];
+  const d = Assets.node('vehicles', 'driver');
+  if (!d) return;
+  const [x, y, z] = spec.p;
+  tint(d, { shirt: SHIRTS[(c + (mirror ? 3 : 0)) % SHIRTS.length], skin: SKINS[(c + (mirror ? 2 : 0)) % SKINS.length] });
+  d.position.set(mirror ? -x : x, y, z); d.scale.setScalar(spec.scale ?? 1);
+  if (spec.hat && !mirror) { const h = Assets.node('vehicles', spec.hat); if (h) { tint(h, { hat: HAT_COLORS[k] ?? '#c62828' }); d.add(h); } }
+  g.add(d);
+}
+
 /** Vehicle facing −Z (like the RV). */
 export function buildVehicle(k: NPCState['k'], c: number): View {
   const g = new THREE.Group();
@@ -77,7 +156,21 @@ export function buildVehicle(k: NPCState['k'], c: number): View {
     }
   };
 
-  if (k === 'sedan' || k === 'cop') {
+  const glb = glbVehicle(view, k, c, paintC);
+  if (glb) {
+    g.add(glb);
+    glbDriver(g, k, c);
+    if (k === 'sedan' && c % 3 === 0) glbDriver(g, k, c, true); // a passenger
+    if (k === 'bandit') {
+      queueMicrotask(() => g.traverse((o) => { o.userData.iid = 'bandit'; })); // after the wheels are added
+      for (const [x, z] of [[-0.4, 1.3], [0.4, 1.9]]) { // two more goons standing in the bed
+        const d = Assets.node('vehicles', 'driver'); const h = Assets.node('vehicles', 'dhat_cap');
+        if (!d) continue;
+        tint(d, { shirt: '#5d4037', skin: SKINS[(c + Math.floor(z)) % SKINS.length] }); d.position.set(x, 1.35, z); g.add(d);
+        if (h) { tint(h, { hat: '#b71c1c' }); d.add(h); }
+      }
+    }
+  } else if (k === 'sedan' || k === 'cop') {
     // rounded sedan: sloped hood, glasshouse, short trunk
     prof(g, paint, [[f, 0.38], [f, 0.74], [f + 0.9, 0.88], [f + 1.5, 0.92], [b - 0.9, 0.92], [b, 0.82], [b, 0.38]], w);
     prof(g, glass, [[f + 1.55, 0.9], [f + 2.2, 1.42], [b - 1.5, 1.42], [b - 0.95, 0.9]], w * 0.9, 0.04);
@@ -156,24 +249,29 @@ export function buildVehicle(k: NPCState['k'], c: number): View {
   }
 
   // wheels
-  const wr = k === 'semi' ? 0.5 : k === 'camper' ? 0.4 : 0.34;
-  view.wheelR = wr;
   const axles = k === 'semi' ? [f + 1.0, b - 1.8, b - 0.7] : [f + l * 0.2, b - l * 0.2];
-  for (const z of axles) for (const s of [-1, 1]) wheel(view, g, wr, s * (hw - 0.05), z, k === 'semi' ? 0.36 : 0.26);
-  // wheel arches
-  if (k !== 'semi') for (const z of axles) for (const s of [-1, 1]) box(g, black, 0.06, wr * 1.5, wr * 2.6, s * (hw + 0.01), wr * 1.15, z);
+  if (glb) glbWheels(view, g, k, hw, axles);
+  else {
+    const wr = k === 'semi' ? 0.5 : k === 'camper' ? 0.4 : 0.34;
+    view.wheelR = wr;
+    for (const z of axles) for (const s of [-1, 1]) wheel(view, g, wr, s * (hw - 0.05), z, k === 'semi' ? 0.36 : 0.26);
+    // wheel arches
+    if (k !== 'semi') for (const z of axles) for (const s of [-1, 1]) box(g, black, 0.06, wr * 1.5, wr * 2.6, s * (hw + 0.01), wr * 1.15, z);
+  }
 
   if (k === 'cop') {
-    box(g, black, w + 0.02, 0.32, l * 0.45, 0, 0.62, 0.1); // two-tone doors
-    const star = new THREE.Mesh(new THREE.CircleGeometry(0.18, 5), new THREE.MeshStandardMaterial({ color: '#d4a017', metalness: 0.8, roughness: 0.3 }));
-    for (const s of [-1, 1]) { const st = star.clone(); st.position.set(s * (hw + 0.02), 0.62, 0.1); st.rotation.y = s * Math.PI / 2; g.add(st); }
-    view.red = new THREE.MeshStandardMaterial({ color: '#600', emissive: '#ff1a1a', emissiveIntensity: 0 });
-    view.blue = new THREE.MeshStandardMaterial({ color: '#006', emissive: '#2962ff', emissiveIntensity: 0 });
     const roofY = 1.55;
-    box(g, black, w * 0.7, 0.08, 0.3, 0, roofY, 0.1);
-    box(g, view.red, w * 0.32, 0.14, 0.26, -w * 0.18, roofY + 0.1, 0.1);
-    box(g, view.blue, w * 0.32, 0.14, 0.26, w * 0.18, roofY + 0.1, 0.1);
-    view.flash = new PoolLight('#ff1a1a', 0, 22, 1.2); view.flash.position.set(0, roofY + 0.5, 0.1); g.add(view.flash);
+    if (!glb) {
+      box(g, black, w + 0.02, 0.32, l * 0.45, 0, 0.62, 0.1); // two-tone doors
+      const star = new THREE.Mesh(new THREE.CircleGeometry(0.18, 5), new THREE.MeshStandardMaterial({ color: '#d4a017', metalness: 0.8, roughness: 0.3 }));
+      for (const s of [-1, 1]) { const st = star.clone(); st.position.set(s * (hw + 0.02), 0.62, 0.1); st.rotation.y = s * Math.PI / 2; g.add(st); }
+      view.red = new THREE.MeshStandardMaterial({ color: '#600', emissive: '#ff1a1a', emissiveIntensity: 0 });
+      view.blue = new THREE.MeshStandardMaterial({ color: '#006', emissive: '#2962ff', emissiveIntensity: 0 });
+      box(g, black, w * 0.7, 0.08, 0.3, 0, roofY, 0.1);
+      box(g, view.red, w * 0.32, 0.14, 0.26, -w * 0.18, roofY + 0.1, 0.1);
+      box(g, view.blue, w * 0.32, 0.14, 0.26, w * 0.18, roofY + 0.1, 0.1);
+    }
+    view.flash = new PoolLight('#ff1a1a', 0, 22, 1.2); view.flash.position.set(0, roofY + 0.5, glb ? 0.49 : 0.1); g.add(view.flash);
   }
   return view;
 }
@@ -188,6 +286,8 @@ function buildRoscoe() {
 export function vehicleSamples(): THREE.Group {
   const g = new THREE.Group();
   for (const k of ['sedan', 'pickup', 'camper', 'semi', 'cop', 'shark', 'bandit'] as NPCState['k'][]) g.add(buildVehicle(k, 0).g);
+  // if the glb lands after boot, compile its materials before the first car shows up
+  if (!Assets.ready) Assets.onReady(() => void warm(vehicleSamples()));
   return g;
 }
 
