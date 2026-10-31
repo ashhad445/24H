@@ -7,6 +7,7 @@ import { makeNpc } from '../models/npcs';
 import type { RVModel } from '../rv/RV';
 import { chaserPose } from '../stops/chaseView';
 import { NPC_DIMS } from './TrafficSim';
+import { deckY, groundY } from '../world/World';
 import type { NPCState, SharedState } from '../types';
 
 const PAINT = ['#e53935', '#1e88e5', '#fdd835', '#43a047', '#f5f5f5', '#8e24aa'];
@@ -316,7 +317,7 @@ export class TrafficView {
     for (const n of s.npcs) {
       seen.add(n.id);
       let v = this.views.get(n.id);
-      if (!v) { v = buildVehicle(n.k, n.c); this.views.set(n.id, v); this.scene.add(v.g); v.g.position.set(n.x, 0, n.z); v.g.rotation.y = n.yaw; }
+      if (!v) { v = buildVehicle(n.k, n.c); this.views.set(n.id, v); this.scene.add(v.g); v.g.rotation.order = 'YXZ'; v.g.position.set(n.x, deckY(n.x, n.z), n.z); v.g.rotation.y = n.yaw; }
       const k = Math.min(1, dt * 12);
       const p = v.g.position;
       if (Math.hypot(n.x - p.x, n.z - p.z) > 30) p.set(n.x, p.y, n.z);
@@ -326,7 +327,11 @@ export class TrafficView {
       // wrecked cars sag; crashed ones barrel-roll (lifted so the roof, not the ground, takes it)
       const roll = n.roll ?? 0;
       v.g.rotation.z = roll || (n.w > 0 ? 0.06 : 0);
-      p.y = roll ? Math.abs(Math.sin(roll)) * NPC_DIMS[n.k][0] + (1 - Math.cos(roll)) * 0.75 : 0;
+      // on the road deck, pitched with the hill (ground sampled under the front and back of the car)
+      const hl = NPC_DIMS[n.k][1], cy = Math.cos(v.g.rotation.y), sy = Math.sin(v.g.rotation.y);
+      const yf = groundY(p.x - sy * hl, p.z - cy * hl), yb = groundY(p.x + sy * hl, p.z + cy * hl);
+      v.g.rotation.x = Math.atan2(yf - yb, 2 * hl);
+      p.y = (yf + yb) / 2 + (roll ? Math.abs(Math.sin(roll)) * NPC_DIMS[n.k][0] + (1 - Math.cos(roll)) * 0.75 : 0);
       v.heads.emissiveIntensity = daylight < 0.5 ? 2.2 : 0.2;
       // wheels roll; brake lights on when slowing; turn signals while changing lanes
       for (const wh of v.wheels) wh.rotation.x -= (n.speed * dt) / v.wheelR;
@@ -357,7 +362,7 @@ export class TrafficView {
     const ft = s.cop.phase === 5 ? s.cop.foot : null;
     if (ft && !this.footRoscoe.visible) this.footRoscoe.position.set(ft.x, 0, ft.z);
     this.footRoscoe.visible = !!ft;
-    if (ft) chaserPose(this.footRoscoe, this.scene, ft, [ft.x, ft.z], dt);
+    if (ft) { chaserPose(this.footRoscoe, this.scene, ft, [ft.x, ft.z], dt); this.footRoscoe.position.y = groundY(this.footRoscoe.position.x, this.footRoscoe.position.z); }
     return siren;
   }
 }

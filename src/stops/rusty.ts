@@ -3,14 +3,19 @@
 // −Z = road forward, +X = right side of the road (the lot).
 import { CFG } from '../config';
 import type { Box2 } from '../rv/RV';
-import { ROAD_HALF, addClearZone, roadPoint, roadYaw } from '../world/World';
+import { ROAD_HALF, addClearZone, roadPoint, roadYaw, touchScenery } from '../world/World';
 import type { StaticSet } from './geom';
 
-export const RUSTY_MILE = 100;
-const Z0 = -RUSTY_MILE / CFG.MILES_PER_METER;
-// origin sits 5 m right of the centerline so the lot clears the 4-lane road
-const [FX, FZ] = roadPoint(Z0, ROAD_HALF - 2.45);
-export const RUSTY_FRAME = { x: FX, z: FZ, yaw: roadYaw(Z0) };
+// The mile is seeded per run (world/RunSeed.ts calls placeRusty); 100 until then.
+export let RUSTY_MILE = 100;
+// origin sits 5 m right of the centerline so the lot clears the 6-lane road
+export const RUSTY_FRAME = { x: 0, z: 0, yaw: 0 };
+function frameAt(mile: number) {
+  const z0 = -mile / CFG.MILES_PER_METER;
+  const [x, z] = roadPoint(z0, ROAD_HALF - 2.45);
+  return { x, z, yaw: roadYaw(z0) };
+}
+Object.assign(RUSTY_FRAME, frameAt(RUSTY_MILE));
 
 export const PRICES = { gas: 2.5, slot: 5, crab: 15, crabWin: 45, wash: 35, overdraftLimit: -100, pistol: 120, ammo: 20, favor: 25 };
 
@@ -104,4 +109,13 @@ export function rustyColliders(): Box2[] {
 
 export const RUSTY_SET: StaticSet = { ...RUSTY_FRAME, boxes: rustyColliders() };
 
-addClearZone({ ...RUSTY_FRAME, x0: LOT.x0 - 1, x1: LOT.x1 + 15, z0: LOT.z0 - 10, z1: LOT.z1 + 10 });
+const ZONE = { ...RUSTY_FRAME, x0: LOT.x0 - 1, x1: LOT.x1 + 15, z0: LOT.z0 - 10, z1: LOT.z1 + 10 };
+addClearZone(ZONE);
+
+/** Move Rusty's to this run's mile (before anything near it spawns). Frame, colliders and clear-zone move in place. */
+export function placeRusty(mile: number) {
+  RUSTY_MILE = mile;
+  const f = frameAt(mile);
+  Object.assign(RUSTY_FRAME, f); Object.assign(RUSTY_SET, f); Object.assign(ZONE, f);
+  touchScenery();
+}

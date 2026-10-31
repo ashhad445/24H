@@ -7,6 +7,7 @@ import { stopFrame, stopOnRoute } from '../stops/kit';
 import type { Obstacle } from '../traffic/TrafficSim';
 import type { Enc, EncKind, ItemState } from '../types';
 import { branchAt, chapelZ, FORKS, forkZ } from '../world/Route';
+import { kindAt, roadY } from '../world/RoadShape';
 import { rnd, type EncHost, type KindDef } from './common';
 import { cattle } from './kinds/cattle';
 import { hitch, riderLeaves, stepRider } from './kinds/hitch';
@@ -20,6 +21,7 @@ import { newWeedTimers, pullWeed, stepWeeds } from './kinds/weeds';
 export const KIND_DEFS: Record<EncKind, KindDef> = { hitch, motorist, cattle, ostrich, suitcase, roadwork, train };
 export const ENC_KINDS = Object.keys(KIND_DEFS) as EncKind[];
 
+const CALM = new Set(['flat', 'straight', 'sweepers']);
 const NO_CANYON = new Set<EncKind>(['train', 'roadwork']);
 export const newEncState = () => ({ list: [], rider: null, weeds: 0, rolling: [], cone: 0, bird: 0 });
 
@@ -72,6 +74,8 @@ export class EncounterSim {
     if (sets.some((set) => Math.abs(set.z - z) < 1200)) return false;
     if (FORKS.some((f) => Math.abs(forkZ(f) - z) < 2200)) return false;
     if (z - chapelZ() < 2500) return false;
+    // only on calm road: no hairpins, cliff shelves, passes or hills (encounter props stand on flat y = 0 road)
+    for (let d = -500; d <= 700; d += 100) if (!CALM.has(kindAt(z - d)) || Math.abs(roadY(z - d)) > 0.3) return false;
     return z < -1500; // not in the first stretch off the rental lot
   }
 

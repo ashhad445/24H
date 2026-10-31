@@ -5,6 +5,7 @@ import type { Box2 } from '../rv/RV';
 import { collideCircle, fromSetLocal, toSetLocal, type StaticSet } from '../stops/geom';
 import type { ItemState, SharedState } from '../types';
 import { KINDS } from './Items';
+import { groundY } from '../world/World';
 
 export const SLOTS: Record<string, [number, number, number]> = {
   skillet: [1.0, 1.648, 0.53],
@@ -76,6 +77,7 @@ export class ItemSim {
   step(dt: number, accel: { x: number; z: number }) {
     const rv = this.s.rv;
     const cols = this.colliders(rv.doorOpen);
+    const ry = groundY(rv.x, rv.z); // the RV sits on the road deck: world items are simulated at RV-relative height
     for (const it of this.s.items) {
       if (it.h !== -1) continue;
       if (it.s) { this.placeInSlot(it); continue; }
@@ -99,11 +101,12 @@ export class ItemSim {
       const winOpen = rv.rearWin && it.k === 'rock';
       const inWin = (x: number, y: number) => Math.abs(x) < 0.62 && y > 1.68 && y < 2.22;
       const wasInside = it.rv && insideBounds(it.x, it.z);
+      if (!it.rv) it.y -= ry;
       it.x += v[0] * dt; it.y += v[1] * dt; it.z += v[2] * dt;
 
       // collide in RV-local space
       let [lx, lz] = it.rv ? [it.x, it.z] : this.toLocal(it.x, it.z);
-      let floor = insideBounds(lx, lz) ? RV.floorY : 0;
+      let floor = insideBounds(lx, lz) ? RV.floorY : groundY(...this.toWorld(lx, lz)) - ry;
       if (it.y < RV.roofY + 0.3) {
         for (const b of cols) {
           if (winOpen && v[2] > 0.5 && inWin(lx, it.y) && b.z0 > RV.zRear - 0.2) continue; // the rear wall has a hole
@@ -134,11 +137,11 @@ export class ItemSim {
         for (const set of this.statics) {
           if (Math.abs(wx - set.x) > 200 || Math.abs(wz - set.z) > 200) continue;
           const [sx, sz] = toSetLocal(set, wx, wz);
-          const res = collideCircle(sx, sz, r, it.y - r, set.boxes);
+          const res = collideCircle(sx, sz, r, it.y + ry - r, set.boxes);
           if (res.x !== sx || res.z !== sz) { v[0] *= -0.3; v[2] *= -0.3; }
           const [nx, nz] = fromSetLocal(set, res.x, res.z);
           [lx, lz] = this.toLocal(nx, nz);
-          floor = Math.max(floor, res.floor);
+          floor = Math.max(floor, res.floor - ry);
         }
       }
 
@@ -182,6 +185,7 @@ export class ItemSim {
           it.x = lx; it.z = lz; v[0] = vx * c - vz * sn; v[2] = vx * sn + vz * c; it.rv = true;
         }
       }
+      if (!it.rv) it.y += ry;
       // items far behind the RV are lost forever
       if (!it.rv && Math.hypot(it.x - rv.x, it.z - rv.z) > 600) this.remove(it.id);
     }

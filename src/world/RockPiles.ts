@@ -2,7 +2,7 @@
 // the host keeps track of how many rocks are left in each.
 import * as THREE from 'three';
 import { routeVersion } from './Route';
-import { CHUNK, chunkRocks } from './World';
+import { CHUNK, chunkRocks, groundY } from './World';
 
 export class RockPiles {
   readonly group = new THREE.Group();
@@ -26,7 +26,7 @@ export class RockPiles {
       g.add(m);
     }
     g.traverse((o) => { o.userData.iid = `rocks:${i}`; });
-    g.position.set(p.x, 0, p.z);
+    g.position.set(p.x, groundY(p.x, p.z), p.z);
     return g;
   }
 

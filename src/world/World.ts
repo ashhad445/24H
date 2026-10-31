@@ -8,11 +8,13 @@ import { FORKS, branchAt, chosen, forkZ, routeOffset, routeVersion, type Fork } 
 import { ASPHALT_L, makeAsphalt, makeGravel, makePaintWear, makeSand } from './TexGen';
 import { createSkyMaterial, duskAmount, skyColor, toDisplay } from './Sky';
 import { DustTrail } from './DustTrail';
+import { FULL_HALF, dropAt, kindAt, mtnAt, railAt, roadHalf, roadSigns, roadY, shapeVersion, shapeX, shapeXS, wallAt, type RoadSign } from './RoadShape';
+export { roadY, roadHalf, lanesAt, kindAt, advisoryAt, roadGrade, railAt, advisoryAhead, lanesAhead, wallAt } from './RoadShape';
 import { GROUND_Y, Mountains, buildTerrainGeometry, createGroundMaterial, setTerrainCtx, terrainH, type GroundUniforms } from './Terrain';
 
 // ---------- road centerline ----------
 /** The base highway before any fork offsets. */
-export function baseX(z: number) { return 60 * Math.sin(z / 600) + 20 * Math.sin(z / 260 + 1.3); }
+export function baseX(z: number) { return shapeX(z); }
 /** Road centerline: base highway + the branches the crew chose at each fork. */
 export function roadX(z: number) { return baseX(z) + routeOffset(z); }
 export function roadDX(z: number) { return roadX(z + 0.5) - roadX(z - 0.5); }
@@ -23,14 +25,31 @@ export function altX(z: number, fork: Fork) {
 const ALT_LEN = 3600; // how far the untaken branch is drawn past the fork
 
 /** Is (x, z) on drivable road — the main road or a fork's other branch? */
-export function onRoad(x: number, z: number, margin = ROAD_HALF + 2.3) {
-  if (Math.abs(x - roadX(z)) < margin) return true;
+export function onRoad(x: number, z: number, margin?: number) {
+  const s = roadS(x, z);
+  if (Math.abs(x - roadX(s)) / Math.hypot(1, roadDX(s)) < (margin ?? roadHalf(s) + 2.3)) return true;
+  margin ??= ROAD_HALF + 2.3;
   for (const f of FORKS) {
     const fz = forkZ(f);
     if (z < fz && z > fz - ALT_LEN && Math.abs(x - altX(z, f)) < margin) return true;
   }
   return false;
 }
+/** Road parameter (centreline z) of the point on the main road closest to (x, z). */
+export function roadS(x: number, z: number) {
+  let s = z;
+  for (let k = 0; k < 3; k++) { const dx = roadDX(s); s += ((x - roadX(s)) * dx + (z - s)) / (1 + dx * dx); }
+  return s;
+}
+/** Signed lateral offset of (x, z) from the main road (+ = right), with its road parameter. */
+export function roadFrame(x: number, z: number): { s: number; off: number } {
+  const s = roadS(x, z); const dx = roadDX(s);
+  return { s, off: (x - roadX(s)) / Math.hypot(1, dx) };
+}
+/** Ground height at a world point (the road deck near the road, terrain beyond). */
+export function groundY(x: number, z: number) { return terrainH(x, z) - GROUND_Y; }
+/** Road deck height under a world point (ignores terrain: for vehicles on / beside the road). */
+export function deckY(x: number, z: number) { return roadY(roadS(x, z)); }
 /** Yaw that faces along the road toward −Z. */
 export function roadYaw(z: number) { return Math.atan2(roadDX(z), 1); }
 // Six-lane highway: three lanes each way. Driving toward −Z, right = +X.
@@ -38,7 +57,7 @@ export const LANE_W = 3.6;
 /** Lane centers for traffic heading −Z (fast, middle, slow). Oncoming lanes are the negatives. */
 export const LANES = [LANE_W / 2, LANE_W * 1.5, LANE_W * 2.5];
 export const LANE_OFFSET = LANES[2]; // the RV starts in the right (slow) lane
-export const ROAD_HALF = LANE_W * 3 + 0.25;
+export const ROAD_HALF = FULL_HALF; // widest (3 lanes each way); narrows on passes: roadHalf(z)
 
 export const CHUNK = 250;
 const AHEAD = 7;
@@ -56,12 +75,39 @@ function lateral(z: number, off: number): [number, number] {
   return [roadX(z) + off / len, z - (dx * off) / len];
 }
 
+/**
+ * Terrain lattice point. Each lattice row starts perpendicular to the road (so the flat corridor, shoulders
+ * and cliff faces line up with the road edge), then bends toward the normal of a heavily smoothed road
+ * between 25 and 70 m out. Far rows are then nearly parallel, so the ground mesh never folds over itself
+ * (or over the road) on the inside of a tight bend.
+ */
+function latticePoint(z: number, off: number): [number, number] {
+  const a = Math.abs(off), sg = Math.sign(off) || 1;
+  const cx = roadX(z), dxt = roadDX(z);
+  const xs = (zz: number) => shapeXS(zz) + routeOffset(zz);
+  const dxs = xs(z + 0.5) - xs(z - 0.5);
+  const tt = Math.atan2(-dxt, 1), ts = Math.atan2(-dxs, 1); // normal angles (x, z) for true / smoothed road
+  const dirAt = (o: number) => { const k = THREE.MathUtils.smoothstep(o, 25, 70); const t = tt + (ts - tt) * k; return [Math.cos(t), Math.sin(t)]; };
+  let px = cx, pz = z, o = 0;
+  const step = (to: number, n: number) => {
+    const h = (to - o) / n;
+    for (let k = 0; k < n; k++) { const [dx, dz] = dirAt(o + h * (k + 0.5)); px += sg * dx * h; pz += sg * dz * h; }
+    o = to;
+  };
+  step(Math.min(a, 25), 1);
+  if (a > 25) step(Math.min(a, 70), 9);
+  if (a > 70) step(a, 1);
+  return [px, pz];
+}
+
 // ---------- clear zones: no desert props inside stop lots ----------
 interface ClearZone { x: number; z: number; yaw: number; x0: number; x1: number; z0: number; z1: number }
 const clearZones: ClearZone[] = [];
 let sceneryVersion = 0;
 /** Keep scenery out of a rectangle given in a stop's local frame. Chunks rebuild to apply it. */
 export function addClearZone(zone: ClearZone) { clearZones.push(zone); sceneryVersion++; }
+/** A clear-zone moved (seeded stop placement): rebuild the streamed chunks. */
+export function touchScenery() { sceneryVersion++; }
 function cleared(wx: number, wz: number) {
   for (const c of clearZones) {
     const dx = wx - c.x, dz = wz - c.z; const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
@@ -84,15 +130,15 @@ function zoneDist(wx: number, wz: number) {
   return best;
 }
 /** Distance (m) to the nearest road centerline: the main road or a fork's other branch. */
-function roadDist(x: number, z: number) {
-  let d = Math.abs(x - roadX(z)) / Math.hypot(1, roadDX(z));
+function roadDist(x: number, z: number, main?: number) {
+  let d = main ?? Math.abs(roadFrame(x, z).off);
   for (const f of FORKS) {
     const fz = forkZ(f);
     if (z < fz + 80 && z > fz - ALT_LEN - 80) d = Math.min(d, Math.abs(x - altX(z, f)) / Math.hypot(1, altX(z + 0.5, f) - altX(z - 0.5, f)));
   }
   return d;
 }
-setTerrainCtx({ roadDist, zoneDist });
+setTerrainCtx({ roadDist, zoneDist, roadFrame, roadY, wallAt, dropAt, roadHalf, mtnAt });
 
 // ---------- hazards (deterministic per chunk so host & clients agree) ----------
 export interface Hazard { id: number; type: 'pothole' | 'debris'; x: number; z: number; r: number }
@@ -110,13 +156,13 @@ export function chunkHazards(i: number): Hazard[] {
     const n = Math.round((r() < 0.55 ? 0 : r() < 0.88 ? 1 : 2) * rough + (rough > 2 && r() < 0.6 ? 1 : 0));
     for (let k = 0; k < n; k++) {
       const z = z0 - r() * CHUNK;
-      const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * 10.2);
+      const off = (r() < 0.6 ? 1 : -1) * (0.6 + r() * Math.max(1, roadHalf(z) - 1.5));
       const [x, zz] = lateral(z, off);
       h.push({ id: i * 100 + k, type: 'pothole', x, z: zz, r: 0.8 + r() * 0.6 });
     }
     if (r() < 0.02) { // rare: tire debris
       const z = z0 - r() * CHUNK;
-      const [x, zz] = lateral(z, 0.8 + r() * 9.8);
+      const [x, zz] = lateral(z, 0.8 + r() * Math.max(1, roadHalf(z) - 1.6));
       h.push({ id: i * 100 + 50, type: 'debris', x, z: zz, r: 0.7 });
     }
   }
@@ -127,12 +173,13 @@ export function chunkHazards(i: number): Hazard[] {
 export const SPEED_LIMIT = 120;
 export interface Radar { id: number; x: number; z: number; yaw: number }
 /** Miles of every stop (Rusty's + the kit stops). Kept here so camera placement never depends on which stops are loaded. */
-export const STOP_MILES = [100, 240, 380, 460];
+export const STOP_MILES = [100, 240, 380, 460]; // replaced in place by RunSeed
 export function chunkRadar(i: number): Radar | null {
   if (i < 2 || i % 20 !== 3) return null;
   const z = -i * CHUNK - CHUNK * 0.3;
   // deterministic: no camera near a stop or inside a "SPEED UNTIL YOU DIE" stretch
   if (noLimitAt(z) || STOP_MILES.some((m) => Math.abs(-m / CFG.MILES_PER_METER - z) < 800)) return null;
+  if (![kindAt(z), kindAt(z + 600), kindAt(z - 300)].every((k) => k === 'flat' || k === 'straight')) return null; // cameras only on straights
   const [x, zz] = lateral(z, 0); // the gantry spans the whole road
   return { id: i, x, z: zz, yaw: roadYaw(z) };
 }
@@ -153,7 +200,8 @@ export interface RockPile { id: number; x: number; z: number }
 export function chunkRocks(i: number): RockPile | null {
   if (i < 1 || i % 2 !== 1) return null;
   const z = -i * CHUNK - CHUNK * (0.45 + ((i * 37) % 10) / 100);
-  const [x, zz] = lateral(z, (i % 4 === 1 ? 1 : -1) * (ROAD_HALF + 4.2));
+  if (Math.abs(wallAt(z)) > 0.05 || dropAt(z, 1) > 0.05 || dropAt(z, -1) > 0.05) return null; // no room on a shelf / pass
+  const [x, zz] = lateral(z, (i % 4 === 1 ? 1 : -1) * (roadHalf(z) + 4.2));
   return cleared(x, zz) ? null : { id: i, x, z: zz };
 }
 
@@ -166,15 +214,18 @@ export function hazardsNear(z: number): Hazard[] {
 }
 
 /** Ribbon following the road between z0 and z1, from lateral offset a to b. */
-function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 5, xf: (z: number) => number = roadX, uvm?: { flip: number; shift: number }): THREE.BufferGeometry {
+type Off = number | ((z: number) => number);
+function ribbon(z0: number, z1: number, a: Off, b: Off, y: number, step = 5, xf: (z: number) => number = roadX, uvm?: { flip: number; shift: number }): THREE.BufferGeometry {
   const n = Math.max(1, Math.ceil(Math.abs(z1 - z0) / step));
   const pos: number[] = []; const uv: number[] = []; const idx: number[] = [];
   for (let k = 0; k <= n; k++) {
     const z = z0 + ((z1 - z0) * k) / n;
     const cx = xf(z); const dx = xf(z + 0.5) - xf(z - 0.5);
     const len = Math.hypot(1, dx); const nx = 1 / len; const nz = -dx / len;
-    for (const off of [a, b]) {
-      pos.push(cx + nx * off, y, z + nz * off);
+    const yy = y + roadY(z);
+    for (const o of [a, b]) {
+      const off = typeof o === 'number' ? o : o(z);
+      pos.push(cx + nx * off, yy, z + nz * off);
       if (uvm) uv.push(off * uvm.flip, z + uvm.shift); else uv.push(off / 4, z / 4);
     }
     if (k < n) { const i = k * 2; idx.push(i, i + 1, i + 2, i + 1, i + 3, i + 2); }
@@ -184,9 +235,15 @@ function ribbon(z0: number, z1: number, a: number, b: number, y: number, step = 
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  // force normals up (winding may flip depending on direction)
+  // force normals up (winding may flip depending on direction); tilt with the grade
   const nrm = geo.getAttribute('normal');
-  for (let i = 0; i < nrm.count; i++) nrm.setXYZ(i, 0, 1, 0);
+  for (let k = 0; k <= n; k++) {
+    const z = z0 + ((z1 - z0) * k) / n; const gz = roadY(z - 1) - roadY(z + 1); const il = 1 / Math.hypot(1, gz / 2);
+    const dx = xf(z + 0.5) - xf(z - 0.5); const hl = 1 / Math.hypot(1, dx);
+    // the slope runs along the road direction (dx, −1)·hl in xz, rising toward −Z
+    const tx = dx * hl, tz = hl; // unit vector pointing back along the road (toward +Z)
+    for (let j = 0; j < 2; j++) nrm.setXYZ(k * 2 + j, tx * (gz / 2) * il, il, tz * (gz / 2) * il);
+  }
   return geo;
 }
 
@@ -447,7 +504,7 @@ export class World {
 
   update(focus: THREE.Vector3, camPos: THREE.Vector3, hour: number, storm = 0, wind = 0, dt = 0.016) {
     this.storm = storm;
-    const ver = `${routeVersion()}:${sceneryVersion}`;
+    const ver = `${routeVersion()}:${sceneryVersion}:${shapeVersion()}`;
     if (ver !== this.builtRoute) {
       // the road beyond a fork moved, or a stop cleared its lot: rebuild what's streamed in
       this.builtRoute = ver;
@@ -486,9 +543,9 @@ export class World {
     this.cloudOff.x += (0.007 + 0.01 * Math.abs(wind) + 0.03 * storm) * dt;
     this.cloudOff.y += 0.003 * dt;
 
-    this.trail.update(dt, focus, roadDist(focus.x, focus.z) > ROAD_HALF + 1.2, this.daylight, wind, this.quality !== 'low');
+    this.trail.update(dt, focus, roadDist(focus.x, focus.z) > roadHalf(roadS(focus.x, focus.z)) + 1.2, this.daylight, wind, this.quality !== 'low');
     this.applyTime(hour, camPos);
-    this.mountains.group.position.set(camPos.x, 0, camPos.z);
+    this.mountains.group.position.set(camPos.x, roadY(roadS(camPos.x, camPos.z)) * 0.85, camPos.z);
     this.sun.position.copy(focus).addScaledVector(this.sunDir, 120);
     this.sun.target.position.copy(focus);
   }
@@ -577,6 +634,129 @@ export class World {
     (this.mats.asphalt as THREE.MeshStandardMaterial).normalScale.setScalar(ns);
   }
 
+  private shapeTex = new Map<string, THREE.Texture>();
+  private shapeMats: Record<string, THREE.Material> | null = null;
+  /** Yellow road-shape sign face (curve speed, grade, narrows, falling rocks, chevrons). */
+  private roadSignTex(sg: RoadSign) {
+    const key = sg.kind + sg.lines.join('|') + (sg.dir ?? 0);
+    let t = this.shapeTex.get(key);
+    if (t) return t;
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#ffd200';
+    if (sg.kind === 'chevron') {
+      g.fillRect(0, 40, 256, 176); g.fillStyle = '#111';
+      const d = sg.dir ?? 1; // bend to the right → arrows point right
+      for (const ox of [-60, 40]) { g.beginPath(); g.moveTo(128 + ox - 30 * d, 70); g.lineTo(128 + ox + 40 * d, 128); g.lineTo(128 + ox - 30 * d, 186); g.lineTo(128 + ox - 5 * d, 186); g.lineTo(128 + ox + 65 * d, 128); g.lineTo(128 + ox - 5 * d, 70); g.fill(); }
+    } else {
+      g.save(); g.translate(128, 128); g.rotate(Math.PI / 4); g.fillRect(-86, -86, 172, 172); g.strokeStyle = '#111'; g.lineWidth = 7; g.strokeRect(-80, -80, 160, 160); g.restore();
+      g.fillStyle = '#111'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      if (sg.kind === 'curve') {
+        g.font = 'bold 84px Arial'; g.fillText(sg.lines[0], 128, 104);
+        g.font = 'bold 30px Arial'; g.fillText(sg.lines[1], 128, 172);
+      } else {
+        sg.lines.forEach((l, k) => { g.font = `bold ${l.length > 7 ? 26 : 34}px Arial`; g.fillText(l, 128, 128 + (k - (sg.lines.length - 1) / 2) * 38); });
+      }
+    }
+    t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    this.shapeTex.set(key, t);
+    return t;
+  }
+
+  /** Guardrails, curve / grade / narrows signs and rock walls for this chunk's stretch of the seeded road. */
+  private buildShapeDressing(i: number, z0: number, z1: number, group: THREE.Group, disposables: THREE.BufferGeometry[]) {
+    const M2 = (this.shapeMats ??= {
+      rail: new THREE.MeshStandardMaterial({ color: '#b9bec4', roughness: 0.45, metalness: 0.7, side: THREE.DoubleSide }),
+      railPost: new THREE.MeshStandardMaterial({ color: '#8c9095', roughness: 0.6, metalness: 0.5 }),
+    });
+    // --- guardrails: a W-beam strip at the shoulder edge, posts every 4 m
+    const posts: THREE.Matrix4[] = [];
+    for (const side of [-1, 1] as const) {
+      const bit = side < 0 ? 1 : 2;
+      let run: number[] = [];
+      const flush = () => {
+        if (run.length >= 2) {
+          const pos: number[] = [], idx: number[] = [];
+          run.forEach((z, k) => {
+            const [x, zz] = lateral(z, side * (roadHalf(z) + 1.95)); const y = roadY(z);
+            pos.push(x, y + 0.45, zz, x, y + 0.82, zz);
+            if (k < run.length - 1) { const a = k * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+          });
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+          disposables.push(geo);
+          const m = new THREE.Mesh(geo, M2.rail); m.castShadow = true; m.receiveShadow = true; group.add(m);
+        }
+        run = [];
+      };
+      for (let z = z0; z >= z1 - 0.01; z -= 4) {
+        if (railAt(z) & bit) {
+          run.push(z);
+          const [x, zz] = lateral(z, side * (roadHalf(z) + 2.05));
+          posts.push(new THREE.Matrix4().compose(new THREE.Vector3(x, roadY(z), zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, roadYaw(z), 0)), new THREE.Vector3(1, 1, 1)));
+        } else flush();
+      }
+      flush();
+    }
+    if (posts.length) {
+      const pg = this.geos.railPost ?? (this.geos.railPost = new THREE.BoxGeometry(0.12, 0.9, 0.16).translate(0, 0.45, 0));
+      const im = new THREE.InstancedMesh(pg, M2.railPost, posts.length);
+      posts.forEach((m, k) => im.setMatrixAt(k, m)); im.castShadow = true; im.computeBoundingSphere(); group.add(im);
+    }
+    // --- signs
+    for (const sg of roadSigns()) {
+      const z = -sg.d;
+      if (!(z <= z0 && z > z1)) continue;
+      const chev = sg.kind === 'chevron';
+      const [x, zz] = lateral(z, sg.side * (roadHalf(z) + (chev ? 2.6 : 3.0)));
+      if (cleared(x, zz)) continue;
+      const g = new THREE.Group();
+      const post = new THREE.Mesh(this.geos.signPost, this.mats.post);
+      if (chev) post.scale.y = 0.75;
+      const tex = this.roadSignTex(sg);
+      const plate = new THREE.Mesh(chev ? (this.geos.chevPlate ??= new THREE.PlaneGeometry(1.0, 1.0)) : (this.geos.shapePlate ??= new THREE.PlaneGeometry(1.7, 1.7)),
+        new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: 0.3, roughness: 0.6, emissive: new THREE.Color('#3a3a3a'), emissiveMap: tex }));
+      plate.position.set(0, chev ? 1.35 : 2.2, 0.07);
+      g.add(post, plate); g.position.set(x, roadY(z), zz); g.rotation.y = roadYaw(z);
+      group.add(g);
+    }
+    // --- rock walls on cliff shelves (the terrain rises behind them)
+    const rc = rng(i * 29 + 3);
+    const walls: THREE.Matrix4[] = [];
+    // staggered blocks in two tiers (a lower jagged face, a taller one set further back) so it reads as broken rock
+    for (let z = z0 - rc() * 6; z > z1; z -= 7 + rc() * 7) {
+      const w = wallAt(z);
+      if (Math.abs(w) < 0.4) continue;
+      const side = Math.sign(w), y0 = roadY(z);
+      for (let tier = 0; tier < 2; tier++) {
+        const sx = 5 + rc() * 7, sz = 7 + rc() * 8;
+        const back = tier === 0 ? 4.0 + rc() * 2.5 : 11 + rc() * 8;
+        const [x, zz] = lateral(z + (rc() - 0.5) * 6, side * (roadHalf(z) + back + sx * 0.5));
+        const h = (tier === 0 ? 7 + rc() * 13 : 18 + rc() * 26) * Math.abs(w);
+        walls.push(new THREE.Matrix4().compose(new THREE.Vector3(x, y0 - 1.2 + (tier ? 4 + rc() * 6 : 0), zz), new THREE.Quaternion().setFromEuler(new THREE.Euler((rc() - 0.5) * 0.12, roadYaw(z) + (rc() - 0.5) * 1.2, (rc() - 0.5) * 0.12)), new THREE.Vector3(sx, h, sz)));
+      }
+    }
+    // a few boulders that rolled down onto the drop-side verge
+    for (let z = z0 - rc() * 30; z > z1; z -= 25 + rc() * 40) {
+      for (const side of [-1, 1] as const) {
+        if (dropAt(z, side) < 0.5) continue;
+        const [x, zz] = lateral(z, side * (roadHalf(z) + 2.6 + rc() * 0.6));
+        walls.push(new THREE.Matrix4().compose(new THREE.Vector3(x, roadY(z) - 0.3, zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(rc(), rc() * 6, rc())), new THREE.Vector3(0.6 + rc(), 0.5 + rc() * 0.6, 0.6 + rc())));
+      }
+    }
+    if (walls.length) {
+      const cv = sceneryVariants('cliff') ?? [this.geos.cliff];
+      cv.forEach((geo, v) => {
+        const mine = walls.filter((_, j) => j % cv.length === v);
+        if (!mine.length) return;
+        const im = new THREE.InstancedMesh(geo, geo !== this.geos.cliff ? BAKED_MAT : this.mats.mesa, mine.length);
+        mine.forEach((m, j) => im.setMatrixAt(j, m));
+        im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
+        group.add(im);
+      });
+    }
+  }
+
   /** Green overhead highway signs announcing a fork, one per branch. */
   private buildGantry(group: THREE.Group, f: Fork, gz: number, disposables: THREE.BufferGeometry[]) {
     const g = new THREE.Group();
@@ -604,14 +784,14 @@ export class World {
     }
     // face oncoming RVs (they approach from +Z)
     const [x, z] = lateral(gz, 0);
-    g.position.set(x, 0, z); g.rotation.y = roadYaw(gz);
+    g.position.set(x, roadY(gz), z); g.rotation.y = roadYaw(gz);
     group.add(g);
     // gore-point chevrons where the branches split
     const fz = forkZ(f);
     const chev = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.0, 0.1), new THREE.MeshStandardMaterial({ color: '#ffd600', emissive: '#ffb300', emissiveIntensity: 0.4 }));
     disposables.push(chev.geometry);
     const [cx, cz] = [(roadX(fz - 650) + altX(fz - 650, f)) / 2, fz - 650];
-    chev.position.set(cx, 0.9, cz); chev.rotation.y = roadYaw(fz);
+    chev.position.set(cx, 0.9 + roadY(fz - 650), cz); chev.rotation.y = roadYaw(fz);
     group.add(chev);
   }
 
@@ -628,19 +808,21 @@ export class World {
     // every chunk gets its own phase / mirroring of the asphalt texture so cracks and stains don't repeat visibly
     const uvm = { flip: i % 2 ? -1 : 1, shift: (((i * 2654435761) >>> 0) / 4294967296) * ASPHALT_L };
     // rolling ground for this stretch (flat y = -0.02 near the road and the stops)
-    add(buildTerrainGeometry(z0, z1, lateral, (x, z) => THREE.MathUtils.smoothstep(zoneDist(x, z), 0, 30)), this.groundMat);
+    add(buildTerrainGeometry(z0, z1, latticePoint, (x, z) => THREE.MathUtils.smoothstep(zoneDist(x, z), 0, 30), roadHalf), this.groundMat);
     const surface = (za: number, zb: number, xf: (z: number) => number, y = 0) => {
-      add(ribbon(za, zb, -ROAD_HALF, ROAD_HALF, y, 5, xf, uvm), this.mats.asphalt);
-      add(ribbon(za, zb, -ROAD_HALF - 1.6, -ROAD_HALF, y - 0.005, 5, xf), this.mats.shoulder);
-      add(ribbon(za, zb, ROAD_HALF, ROAD_HALF + 1.6, y - 0.005, 5, xf), this.mats.shoulder);
+      const hw = (z: number) => roadHalf(z), n = (k: number) => (z: number) => -roadHalf(z) + k, p = (k: number) => (z: number) => roadHalf(z) + k;
+      add(ribbon(za, zb, n(0), hw, y, 5, xf, uvm), this.mats.asphalt);
+      add(ribbon(za, zb, n(-1.6), n(0), y - 0.005, 5, xf), this.mats.shoulder);
+      add(ribbon(za, zb, hw, p(1.6), y - 0.005, 5, xf), this.mats.shoulder);
       // edge lines, double-yellow center, dashed white lane dividers
-      add(ribbon(za, zb, -ROAD_HALF + 0.1, -ROAD_HALF + 0.25, y + 0.012, 5, xf), this.mats.white);
-      add(ribbon(za, zb, ROAD_HALF - 0.25, ROAD_HALF - 0.1, y + 0.012, 5, xf), this.mats.white);
+      add(ribbon(za, zb, n(0.1), n(0.25), y + 0.012, 5, xf), this.mats.white);
+      add(ribbon(za, zb, p(-0.25), p(-0.1), y + 0.012, 5, xf), this.mats.white);
       add(ribbon(za, zb, -0.22, -0.08, y + 0.012, 5, xf), this.mats.yellow);
       add(ribbon(za, zb, 0.08, 0.22, y + 0.012, 5, xf), this.mats.yellow);
       const dashes: THREE.BufferGeometry[] = [];
       for (let z = za - (((za % 12) + 12) % 12); z > zb; z -= 12) {
-        for (const off of [-2 * LANE_W, -LANE_W, LANE_W, 2 * LANE_W]) dashes.push(ribbon(z, Math.max(zb, z - 5), off - 0.07, off + 0.07, y + 0.012, 3, xf));
+        // a divider only where both lanes beside it are still open (tapers swallow them)
+        for (const off of [-2 * LANE_W, -LANE_W, LANE_W, 2 * LANE_W]) if (Math.abs(off) < roadHalf(z) - LANE_W * 0.9) dashes.push(ribbon(z, Math.max(zb, z - 5), off - 0.07, off + 0.07, y + 0.012, 3, xf));
       }
       if (dashes.length) { add(mergeGeometries(dashes), this.mats.white); dashes.forEach((d) => d.dispose()); }
     };
@@ -664,7 +846,7 @@ export class World {
           if (onRoad(x, zz, 14)) continue; // keep clear of the other branch near the fork
           // a cliff block is ~18 x 24 m: keep the whole footprint out of stop lots (the junkyard)
           if ([[0, 0], [-10, -13], [10, -13], [-10, 13], [10, 13]].some(([dx, dz]) => cleared(x + dx, zz + dz))) continue;
-          cliffs.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rc() * 0.6, 0)), new THREE.Vector3(10 + rc() * 8, 16 + rc() * 22, 24)));
+          cliffs.push(new THREE.Matrix4().compose(new THREE.Vector3(x, roadY(z), zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rc() * 0.6, 0)), new THREE.Vector3(10 + rc() * 8, 16 + rc() * 22, 24)));
         }
       }
       const cv = sceneryVariants('cliff') ?? [this.geos.cliff];
@@ -684,7 +866,7 @@ export class World {
         const post = new THREE.Mesh(this.geos.signPost, this.mats.post);
         const diamond = new THREE.Mesh(this.geos.holeSign, new THREE.MeshStandardMaterial({ map: this.holeTex.rock, roughness: 0.7, emissive: new THREE.Color('#333'), emissiveMap: this.holeTex.rock }));
         diamond.position.set(0, 2.0, 0.06);
-        sg.add(post, diamond); sg.position.set(sx, 0, szz); sg.rotation.y = roadYaw(sz);
+        sg.add(post, diamond); sg.position.set(sx, roadY(sz), szz); sg.rotation.y = roadYaw(sz);
         group.add(sg);
       }
     }
@@ -698,11 +880,12 @@ export class World {
     for (let k = 0; k < 70; k++) {
       const z = z0 - r() * CHUNK;
       const side = r() < 0.5 ? -1 : 1;
-      const off = side * (ROAD_HALF + 5 + Math.pow(r(), 1.6) * 140);
+      const off = side * (roadHalf(z) + 5 + Math.pow(r(), 1.6) * 140);
       const [x, zz] = lateral(z, off);
       if (cleared(x, zz) || onRoad(x, zz, 8)) continue;
+      if ((side * wallAt(z) > 0.05 && Math.abs(off) < roadHalf(z) + 60) || dropAt(z, side) > 0.3) continue; // cliff face / thin air
       const t = r();
-      const gy = terrainH(x, zz) - GROUND_Y; // props stand on the (gently rolling) ground; 0 on the flat corridor
+      const gy = groundY(x, zz); // props stand on the ground (the road deck height on the flat corridor)
       if (t < 0.25) place.saguaro.push(m4(x, gy, zz, 0.8 + r() * 0.7, r() * 6.28));
       else if (t < 0.4) place.barrel.push(m4(x, gy, zz, 0.7 + r() * 0.6, r() * 6.28));
       else if (t < 0.65) place.rock.push(m4(x, gy - 0.05, zz, 0.4 + r() * 1.8, r() * 6.28));
@@ -713,12 +896,15 @@ export class World {
       const off = (r() < 0.5 ? -1 : 1) * (180 + r() * 450);
       const [x, zz] = lateral(z, off);
       const s = 25 + r() * 45;
-      place.mesa.push(m4(x, terrainH(x, zz) - 1.5, zz, s, r() * 6.28, 12 + r() * 30));
+      // sink it to the lowest ground under its footprint so it never hangs off a slope
+      let gy = terrainH(x, zz);
+      for (const [ox, oz] of [[0.7, 0], [-0.7, 0], [0, 0.7], [0, -0.7]]) gy = Math.min(gy, terrainH(x + ox * s, zz + oz * s));
+      place.mesa.push(m4(x, gy - 1.5, zz, s, r() * 6.28, 12 + r() * 30));
     }
     for (let z = z0 - (i * 7) % 60; z > z1; z -= 60) {
-      const [x, zz] = lateral(z, ROAD_HALF + 5);
-      if (cleared(x, zz)) continue;
-      place.pole.push(m4(x, 0, zz, 1, -roadYaw(z)));
+      const [x, zz] = lateral(z, roadHalf(z) + 5);
+      if (cleared(x, zz) || wallAt(z) > 0.05 || dropAt(z, 1) > 0.05) continue;
+      place.pole.push(m4(x, roadY(z), zz, 1, -roadYaw(z)));
     }
     for (const [key, list] of Object.entries(place)) {
       if (!list.length) continue;
@@ -755,7 +941,7 @@ export class World {
         const ring = new THREE.Mesh(this.geos.sprayRing, this.mats.spray); ring.position.y = 0.012; ring.scale.set(hz.r * 1.6, 1, hz.r * 1.6 * sq);
         pg.add(patch, hole, ring);
         if (hz.id % 3 === 0) { const cone = new THREE.Mesh(this.geos.cone, this.mats.spray); cone.position.set(hz.r * 1.9, 0, 0); cone.castShadow = true; pg.add(cone); }
-        pg.position.set(hz.x, 0, hz.z); pg.rotation.y = hz.id;
+        pg.position.set(hz.x, deckY(hz.x, hz.z), hz.z); pg.rotation.y = hz.id;
         group.add(pg);
         // every third one gets a hand-painted warning sign 200 m before it
         if (hz.id % 3 === 0) {
@@ -763,13 +949,13 @@ export class World {
           const canyon = !!branchAt(z)?.canyon;
           const pool = canyon ? this.holeTex.canyon : this.holeTex.road;
           const tex = pool[hz.id % pool.length];
-          const [wx, wz] = lateral(z, ROAD_HALF + 2.2);
-          if (!cleared(wx, wz)) {
+          const [wx, wz] = lateral(z, roadHalf(z) + 2.2);
+          if (!cleared(wx, wz) && !railAt(z)) {
             const sg = new THREE.Group();
             const post = new THREE.Mesh(this.geos.signPost, this.mats.wood);
             const plate = new THREE.Mesh(this.geos.holeSign, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, emissive: new THREE.Color('#2a2a2a'), emissiveMap: tex }));
             plate.position.set(0, 1.9, 0.06); plate.rotation.z = ((hz.id % 7) - 3) * 0.04; // nailed on crooked
-            sg.add(post, plate); sg.position.set(wx, 0, wz); sg.rotation.y = roadYaw(z);
+            sg.add(post, plate); sg.position.set(wx, roadY(z), wz); sg.rotation.y = roadYaw(z);
             group.add(sg);
           }
         }
@@ -780,7 +966,7 @@ export class World {
           piece.position.set((k - 1.5) * 0.35, 0.05, ((k * 37) % 5) * 0.12 - 0.25); piece.rotation.set(Math.PI / 2, 0, k * 1.3);
           piece.castShadow = true; g.add(piece);
         }
-        g.position.set(hz.x, 0, hz.z); group.add(g);
+        g.position.set(hz.x, deckY(hz.x, hz.z), hz.z); group.add(g);
       }
     }
 
@@ -801,28 +987,29 @@ export class World {
         const lens = new THREE.Mesh(new THREE.CircleGeometry(0.2, 14), new THREE.MeshStandardMaterial({ color: '#111', emissive: '#ff1744', emissiveIntensity: 1.8 }));
         lens.position.set(cx, 6.2, 1.01); g.add(lens); disposables.push(lens.geometry);
       }
-      g.position.set(radar.x, 0, radar.z);
+      g.position.set(radar.x, roadY(-i * CHUNK - CHUNK * 0.3), radar.z);
       g.rotation.y = radar.yaw; // the +Z faces look back down the road at the oncoming RV
       group.add(g);
     }
     for (const [ahead, ti] of [[1, 0], [2, 1]] as const) {
       if (!chunkRadar(i + ahead)) continue;
       const z = -i * CHUNK - CHUNK * 0.35;
-      const [wx, wz] = lateral(z, ROAD_HALF + 2.6);
+      const [wx, wz] = lateral(z, roadHalf(z) + 2.6);
       if (cleared(wx, wz)) continue;
       const g = new THREE.Group();
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.2, 0.12).translate(0, 1.6, 0), this.mats.post);
       const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshStandardMaterial({ map: this.warnTex[ti], roughness: 0.6, emissive: new THREE.Color('#333'), emissiveMap: this.warnTex[ti] }));
       plate.position.set(0, 3.0, 0.08);
-      g.add(post, plate); g.position.set(wx, 0, wz); g.rotation.y = roadYaw(z);
+      g.add(post, plate); g.position.set(wx, roadY(z), wz); g.rotation.y = roadYaw(z);
       disposables.push(post.geometry, plate.geometry);
       group.add(g);
     }
 
     // occasional billboard on the right side
-    if (i >= 0 && i % 3 === 1 && !cleared(...lateral(z0 - CHUNK * 0.5, ROAD_HALF + 12))) {
+    const bz = z0 - CHUNK * 0.5;
+    if (i >= 0 && i % 3 === 1 && !cleared(...lateral(bz, ROAD_HALF + 12)) && Math.abs(wallAt(bz)) < 0.05 && dropAt(bz, 1) < 0.05 && !railAt(bz)) {
       const z = z0 - CHUNK * 0.5;
-      const [x, zz] = lateral(z, ROAD_HALF + 12);
+      const [x, zz] = lateral(z, roadHalf(z) + 12);
       const bb = new THREE.Group();
       const tex = i >= 7 && i % DEATH_SIGN_EVERY === 7 ? this.signTex[BILLBOARDS.length] : this.signTex[Math.floor(i / 3) % BILLBOARDS.length];
       const board = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.2), [
@@ -835,7 +1022,7 @@ export class World {
       disposables.push(legGeo);
       for (const lx of [-2.8, 2.8]) { const leg = new THREE.Mesh(legGeo, this.mats.wood); leg.position.x = lx; leg.castShadow = true; bb.add(leg); }
       bb.add(board);
-      bb.position.set(x, 0, zz);
+      bb.position.set(x, groundY(x, zz), zz);
       // face oncoming traffic (+Z), angled toward the road
       bb.rotation.y = -roadYaw(z) - 0.35;
       group.add(bb);
@@ -845,17 +1032,18 @@ export class World {
     const mPerMile = 1 / CFG.MILES_PER_METER;
     for (let mile = Math.ceil(-z0 / mPerMile); mile * mPerMile < -z1; mile++) {
       const z = -mile * mPerMile;
-      const [x, zz] = lateral(z, ROAD_HALF + 2);
+      const [x, zz] = lateral(z, roadHalf(z) + 2);
       if (cleared(x, zz)) continue;
       const post = new THREE.Mesh(this.geos.markerPost ?? (this.geos.markerPost = new THREE.BoxGeometry(0.08, 1.2, 0.08).translate(0, 0.6, 0)), this.mats.post);
       const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.5), new THREE.MeshStandardMaterial({ map: markerTex(mile), roughness: 0.7 }));
       disposables.push(plate.geometry);
       plate.position.set(0, 1.3, 0.05);
       const g = new THREE.Group(); g.add(post, plate);
-      g.position.set(x, 0, zz); g.rotation.y = -roadYaw(z);
+      g.position.set(x, roadY(z), zz); g.rotation.y = -roadYaw(z);
       group.add(g);
     }
 
+    this.buildShapeDressing(i, z0, z1, group, disposables);
     this.group.add(group);
     return { i, group, disposables };
   }

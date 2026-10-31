@@ -362,6 +362,7 @@ export class RustyView {
   /** Per-frame animation. `itemPos(id)` gives an item's current world position (for the hose). */
   update(dt: number, s: SharedState, focus: THREE.Vector3, itemPos: (id: number) => THREE.Vector3 | null, sound: (name: string) => void) {
     const dist = Math.hypot(focus.x - RUSTY_FRAME.x, focus.z - RUSTY_FRAME.z);
+    this.group.position.set(RUSTY_FRAME.x, 0, RUSTY_FRAME.z); this.group.rotation.y = RUSTY_FRAME.yaw; // seeded mile
     this.group.visible = dist < 1600;
     if (!this.group.visible) return;
     const r = s.rusty;

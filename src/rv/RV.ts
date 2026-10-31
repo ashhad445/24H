@@ -6,6 +6,7 @@ import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
 import { RVPolish, dressRVMaterials } from './RVPolish';
 import { boxGeo } from '../fx/ProcTex';
+import { groundY } from '../world/World';
 import { CHARM2_QUOTES, CHARM_QUOTES } from './charmQuotes';
 import { KINDS, buildItemMesh, itemName } from '../items/Items';
 
@@ -601,8 +602,14 @@ export class RVModel {
     const nx = 0.06 + (s.station / (RADIO_STATIONS.length - 1)) * 0.12;
     this.radioNeedle.position.x += (nx - this.radioNeedle.position.x) * Math.min(1, dt * 8);
     this.radioKnob.rotation.z = -s.station * 1.3;
-    this.root.position.set(s.x, 0, s.z);
-    this.root.rotation.y = s.yaw;
+    // sit on the ground: height under the centre, pitch / roll from the ground under the axles and sides
+    const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+    const yc = groundY(s.x, s.z);
+    const yf = groundY(s.x - sn * 2.6, s.z - c * 2.6), yb = groundY(s.x + sn * 2.6, s.z + c * 2.6);
+    const yl = groundY(s.x - c * 1.2, s.z + sn * 1.2), yr = groundY(s.x + c * 1.2, s.z - sn * 1.2);
+    this.root.position.set(s.x, (yc + (yf + yb) / 2) / 2, s.z);
+    this.root.rotation.order = 'YXZ';
+    this.root.rotation.set(Math.atan2(yf - yb, 5.2), s.yaw, Math.atan2(yr - yl, 2.4));
 
     // body pitch / roll from acceleration
     const a = dt > 0 ? (s.speed - this.lastSpeed) / dt : 0;

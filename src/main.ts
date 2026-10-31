@@ -32,6 +32,7 @@ import { setupSettings } from './ui/Settings';
 import { Vultures } from './world/Vultures';
 import { CanyonView } from './world/CanyonView';
 import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadPoint, roadX, roadYaw } from './world/World';
+import { applyRunSeed, newRunSeed } from './world/RunSeed';
 import { RockPiles } from './world/RockPiles';
 import { Graphics } from './fx/Graphics';
 import { MafiaView } from './traffic/MafiaView';
@@ -168,6 +169,8 @@ async function start() {
   };
 
   if (isHost) {
+    // a new road and stop layout every run (before the host builds anything that depends on it)
+    if (applyRunSeed(newRunSeed())) clearHazardsBeyond(1e9);
     host = new HostSim((m) => { applyEvent(m); net.broadcast(m); }, (open) => rv.activeColliders(open));
     host.names = nameOf;
     host.crew(net.myId);
@@ -329,7 +332,8 @@ async function start() {
       shared = host.s;
     } else interpolate();
 
-    // keep the road in sync with the host's fork decisions
+    // same road as the host (seed arrives with the first snapshot), and the same fork decisions
+    if (typeof shared.seed === 'number' && applyRunSeed(shared.seed)) clearHazardsBeyond(1e9);
     const changedZ = setRouteChoices(shared.route);
     if (changedZ !== null) clearHazardsBeyond(changedZ);
 

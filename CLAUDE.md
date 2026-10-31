@@ -134,12 +134,14 @@ Lose: clock hits 24:00 · RV destroyed · stranded (no fuel, no money) · arrive
 
 | Leg | Miles | Content |
 | :- | :--- | :--- |
-| 0 | 0 | **Rental Lot** — tutorial: grab keys & card, learn controls, leave the lot |
+| 0 | 0 | **Rental Lot** — tutorial: grab keys & card, learn controls, leave the lot (not built yet) |
 | 1 | 0 → 50 | Route 66 desert → **Rusty's Oasis Gas & Slots** (pumps, car wash, store w/ Cletus, backroom slots, crab derby, siphon target SUV) |
 | 2 | 50 → 120 | **Fork A:** *I‑15 (smooth, +20 mi)* → **Lucky Scorpion Diner** (cheap food, burger‑flip job, jukebox) **vs** *Dead Man's Canyon (rough, −15 mi, rockfalls, no gas)* → **Canyon Junkyard** (pawn props, spare parts) |
 | 3 | 120 → 190 | **Fork B:** **Roadside Motel** (sleep to restore stamina but lose time, ice machine) **vs** **Rusty Cactus Casino** (blackjack, roulette, high‑roller slots, bouncer) |
 | 4 | 190 → 230 | Radar zones & Sheriff Roscoe heavy stretch → **Last Chance Gas** (expensive fuel $4/gal, pawn shop) |
 | 5 | 230 → 250 | Vegas outskirts, traffic → **Desert Wedding Chapel** — drive through the arch |
+
+Since the dynamic-road update, stop and fork miles are **seeded per run** (see Phase 6 "Dynamic road"); the table above is the seed-0 layout.
 
 **Time / weather:** clock drives sun (06:00 start → night → next morning). Headlights needed at night. Sandstorms & crosswinds on leg 2/4.
 
@@ -441,6 +443,18 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Look**: sky reflections (a PMREM env map baked from the sky dome every 4 s, on at every quality so shaders never change), bloom, a warm color grade, vignette and grain. The composer renders the scene into a half-float target, which uses the same shader variant as the mirrors, so `warm()` still covers it.
   - **Sky / terrain / road** (`world/Sky.ts`, `Terrain.ts`, `TexGen.ts`, `Noise.ts`, `DustTrail.ts`): scattering sky with drifting clouds, sun glare, twilight palette; fog colour = sky horizon. Streamed terrain strips per chunk: flat (y = −0.02) within 40 m of any road and around stop clear-zones, dunes and hills beyond, 3 parallax rings of far mountains. Procedural asphalt (tracks, cracks, patches, oil), worn paint, gravel shoulders. Stars have per-star size / brightness / tint + twinkle. Low sun: warm sky fill and flatter ground/asphalt normal maps (no dark speckle at sunset). `world.quality` is set by `main.ts` with the Esc-menu setting (dust trail + mountain shimmer only on Medium / High).
   - **Vehicles & animals** (`art/vehicles.py` → `vehicles.glb`, `art/animals.py` → `animals.glb`): sedan, cop, pickup, bandit pickup, camper, semi, shark car, wheels, drivers; locomotive + box/tank/hopper cars, crossing signal; cows (superellipse barrel body, 3 irregular patch layouts with refined patch borders), ostrich, cone. Procedural fallbacks stay until the glbs load.
+- [x] **Dynamic road + a new layout every run** (`world/RoadShape.ts`, `world/RunSeed.ts`; tests: `npx tsx scripts/sim-road-shape.ts`, `npx tsx scripts/sim-road-drive.ts`):
+  - **Run seed**: the host picks `s.seed` at start (`?seed=N` forces one; `0` = the old straight, flat highway, also used by the lobby preview and the headless sims). Clients apply it from their first snapshot, so everyone builds the same road locally.
+  - **Seeded places**: Rusty's (mile 85–115), fork A (180–220) and fork B (320–355) with their stops 40 mi after the fork, Last Chance Gas (436–452). Fork sides and branch mile deltas also vary. `RUSTY_FRAME` / `RUSTY_SET` / stop `def.mile` / `FORKS[].mile` are mutated in place by `applyRunSeed`, so never cache them at import time.
+  - **Segments** between keep-zones: straight, sweepers (R 650–1300 m), rolling hills, twisties (R 85–210 m, heading up to ~55°), and mountains = climb (≤ 7.5 %, up to ~300 m) → **cliff shelf** (rock wall one side, drop + guardrail the other, 2 lanes each way) or **narrow ridge pass** (1 lane each way, rails both sides) → descent. Roughly half the drivable road is technical.
+  - **Keep-zones** (start, every stop, every fork + the untaken branch, every possible chapel spot) are straight, flat (y = 0), x = 0 and 3 lanes, so stop lots and forks need nothing special. Every climb has a matching descent.
+  - **Limits**: the road is still a function of z (no hairpins / switchbacks), because odometer, chunks, forks, stops, chapel and traffic all use z as progress.
+  - **Heights**: `roadY(z)` / `deckY(x,z)` / `groundY(x,z)` (World). Anything placed beside the road takes `roadY(z)`; the RV model, traffic, players, loose items, rock piles and boulders all sit on it. The RV pitches / rolls with the ground (on `rv.root`, so the cabin camera tilts too); its interior sim stays flat RV-local. Gravity on grades in `stepRV(…, slope)`.
+  - **Widths**: `roadHalf(z)` / `lanesAt(z)` (3, 2 or 1 lanes each way with 350 m tapers). Traffic merges inward before a lane ends (it's an obstacle until they do) and slows to ~1.1× the advisory speed in bends.
+  - **Guardrails** (`railAt(z)` bits, `Host.collideRails`): solid. Push back, redirect along the rail, scrape / bang, −1…−6 integrity. Never go over the edge.
+  - **Signs** (`roadSigns()`): CURVE xx MPH (from the RV's real steering limit), chevrons on tight bends, % GRADE, TRUCKS USE LOW GEAR, ROAD NARROWS, ONE LANE EACH WAY, FALLING ROCKS. Cliff shelves drop boulders (reuses the canyon rockfall, from the wall side).
+  - **Terrain**: lattice rows bend toward a smoothed road frame 25–70 m out so the mesh never folds on tight bends; mountains crowd the road (taller hills, narrower flat corridor), shelf walls and drops are terrain terms plus staggered cliff blocks; steep faces get a banded rock tint. Speed cameras only on straights; road encounters only on flat calm road (straight / sweepers).
+  - Paper map shows this run's stop miles and marks mountains, cliff roads, narrow passes and twisty bits.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 

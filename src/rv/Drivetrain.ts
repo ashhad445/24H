@@ -19,7 +19,7 @@ export function newRVState(x: number, z: number, yaw: number): RVState {
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 /** Advance the RV by dt. Returns event names ('stall', 'started', 'nofuel', 'overheat'). */
-export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, offroad: boolean): string[] {
+export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, offroad: boolean, slope = 0): string[] {
   const ev: string[] = [];
   const { IDLE, REDLINE } = ENGINE;
 
@@ -70,6 +70,7 @@ export function stepRV(rv: RVState, aux: RVAux, input: DriveInput, dt: number, o
   const rolling = 0.12 + (offroad ? 0.9 : 0);
   const aero = 0.00032 * rv.speed * rv.speed;
   const brakes = rv.brake * 6.5 + (rv.handbrake ? 4.5 : 0);
+  acc -= 9.8 * slope; // gravity along the hill (slope = rise per metre in the RV's forward direction)
   rv.speed += acc * dt;
   const resist = (rolling + aero + brakes) * dt;
   if (Math.abs(rv.speed) <= resist) {

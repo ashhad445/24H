@@ -124,6 +124,7 @@ export interface EncState {
 
 export interface SharedState {
   rv: RVState;
+  seed: number; // run seed: road shape + stop / fork placement (world/RunSeed.ts)
   route: number[]; // branch chosen at each fork (−1 = not reached yet)
   weather: { storm: number; wind: number }; // storm 0–1, wind = lateral push (± = right/left)
   npcs: NPCState[];

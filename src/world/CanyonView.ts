@@ -1,8 +1,9 @@
 // Client view of Devil's Canyon hazards: falling boulders with dust trails, rubble when they shatter, the bandits' couch.
 import * as THREE from 'three';
 import type { SharedState } from '../types';
+import { deckY } from './World';
 
-interface Bit { m: THREE.Mesh; vx: number; vy: number; vz: number; t: number }
+interface Bit { m: THREE.Mesh; vx: number; vy: number; vz: number; t: number; base?: number }
 
 export class CanyonView {
   private group = new THREE.Group();
@@ -33,26 +34,27 @@ export class CanyonView {
       let v = this.rocks.get(b.id);
       if (!v) { const m = new THREE.Mesh(this.rockGeo, this.rockMat); m.castShadow = true; this.group.add(m); v = { m, broke: false }; this.rocks.set(b.id, v); }
       v.m.scale.setScalar(b.r);
-      v.m.position.set(b.x, b.y, b.z);
+      const by = b.y + deckY(b.x, b.z); // the sim's heights are above the road deck
+      v.m.position.set(b.x, by, b.z);
       v.m.rotation.x += (Math.hypot(b.vx, b.vz) / b.r) * dt + (b.y > b.r + 0.2 ? dt * 2 : 0);
-      if (b.y > b.r + 0.5 && Math.random() < dt * 25) this.puff(b.x, b.y, b.z, 0.6 + Math.random() * 0.6);
+      if (b.y > b.r + 0.5 && Math.random() < dt * 25) this.puff(b.x, by, b.z, 0.6 + Math.random() * 0.6);
       if (b.broken > 0 && !v.broke) {
         // shatter: the rock becomes a spray of chunks and a dust cloud
         v.broke = true; v.m.visible = false;
         for (let i = 0; i < 9; i++) {
-          const m = new THREE.Mesh(this.rockGeo, this.rockMat); m.scale.setScalar(b.r * (0.2 + Math.random() * 0.25)); m.position.set(b.x, b.y, b.z); m.castShadow = true;
+          const m = new THREE.Mesh(this.rockGeo, this.rockMat); m.scale.setScalar(b.r * (0.2 + Math.random() * 0.25)); m.position.set(b.x, by, b.z); m.castShadow = true;
           this.group.add(m);
-          this.bits.push({ m, vx: (Math.random() - 0.5) * 9, vy: 3 + Math.random() * 5, vz: (Math.random() - 0.5) * 9, t: 6 });
+          this.bits.push({ m, vx: (Math.random() - 0.5) * 9, vy: 3 + Math.random() * 5, vz: (Math.random() - 0.5) * 9, t: 6, base: by - b.y });
         }
-        for (let i = 0; i < 6; i++) this.puff(b.x + (Math.random() - 0.5) * 2, b.y, b.z + (Math.random() - 0.5) * 2, 1.5 + Math.random());
+        for (let i = 0; i < 6; i++) this.puff(b.x + (Math.random() - 0.5) * 2, by, b.z + (Math.random() - 0.5) * 2, 1.5 + Math.random());
       }
     }
     for (const [id, v] of this.rocks) if (!seen.has(id)) { this.group.remove(v.m); this.rocks.delete(id); }
 
     for (const p of this.bits) {
       p.t -= dt; p.vy -= 9.8 * dt;
-      p.m.position.x += p.vx * dt; p.m.position.y = Math.max(p.m.scale.x * 0.5, p.m.position.y + p.vy * dt); p.m.position.z += p.vz * dt;
-      if (p.m.position.y <= p.m.scale.x * 0.5) { p.vx *= 0.9; p.vz *= 0.9; p.vy = 0; }
+      p.m.position.x += p.vx * dt; p.m.position.y = Math.max((p.base ?? 0) + p.m.scale.x * 0.5, p.m.position.y + p.vy * dt); p.m.position.z += p.vz * dt;
+      if (p.m.position.y <= (p.base ?? 0) + p.m.scale.x * 0.5) { p.vx *= 0.9; p.vz *= 0.9; p.vy = 0; }
       p.m.rotation.x += p.vx * dt;
     }
     for (const p of this.puffs) {

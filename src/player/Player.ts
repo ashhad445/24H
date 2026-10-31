@@ -6,6 +6,7 @@ import type { Input } from '../core/Input';
 import { RVModel, SEATS, SEAT_EYE } from '../rv/RV';
 import { collideCircle, fromSetLocal, toSetLocal, type StaticSet } from '../stops/geom';
 import type { DriveInput, Pose, SeatRole, SharedState } from '../types';
+import { groundY } from '../world/World';
 
 const insideBounds = (x: number, z: number) => Math.abs(x) < RV.innerHalfW + 0.04 && z > RV.zFront && z < RV.zRear - 0.04;
 
@@ -115,7 +116,8 @@ export class Player {
 
     // collide in RV-local space
     let l = this.inRV ? { x: this.pos.x, z: this.pos.z } : this.toLocal(this.pos.x, this.pos.z);
-    if (this.pos.y < RV.roofY) {
+    const ry = this.rv.root.position.y;
+    if (this.pos.y - (this.inRV ? 0 : ry) < RV.roofY) {
       const r = PLAYER.radius;
       for (const b of this.rv.activeColliders(shared.rv.doorOpen)) {
         const cx = THREE.MathUtils.clamp(l.x, b.x0, b.x1), cz = THREE.MathUtils.clamp(l.z, b.z0, b.z1);
@@ -133,8 +135,10 @@ export class Player {
     }
     const inside = insideBounds(l.x, l.z);
 
-    // floor
-    let floor = inside ? RV.floorY : 0;
+    // floor (RV-local heights inside, world heights outside; the RV root sits at height ry)
+    let floor: number;
+    if (inside) floor = RV.floorY + (this.inRV ? 0 : ry);
+    else { const w = this.toWorld(l.x, l.z); floor = groundY(w.x, w.z) - (this.inRV ? ry : 0); }
     if (!this.inRV && !inside) {
       // stop buildings (walls, counters, cars) in world space
       let [wx, wz] = [this.pos.x, this.pos.z];
@@ -179,6 +183,8 @@ export class Player {
     if (v === this.inRV) return;
     const r = this.rvPose(); const c = Math.cos(r.yaw), s = Math.sin(r.yaw);
     const rvVx = -Math.sin(r.yaw) * rvSpeed, rvVz = -Math.cos(r.yaw) * rvSpeed;
+    const ry = this.rv.root.position.y;
+    this.pos.y += v ? -ry : ry;
     if (!v) {
       const w = this.toWorld(this.pos.x, this.pos.z);
       const vx = this.vel.x * c + this.vel.z * s, vz = -this.vel.x * s + this.vel.z * c;

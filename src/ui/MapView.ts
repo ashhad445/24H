@@ -2,9 +2,11 @@
 import { CFG } from '../config';
 import { FORKS, chosen, progressMiles, totalMiles } from '../world/Route';
 import type { SharedState } from '../types';
+import { kindAt } from '../world/RoadShape';
+import { runLayout } from '../world/RunSeed';
 
 /** Stops shown on the main line (branch stops are labelled on the fork branches). */
-const STOPS: [number, string][] = [[100, "Rusty's Oasis"], [460, 'Last Chance Gas']];
+const M = 1 / CFG.MILES_PER_METER;
 
 export class MapView {
   private el = document.getElementById('map')!;
@@ -42,6 +44,20 @@ export class MapView {
     for (let m = 0; m <= total; m += 2) g.lineTo(mx(m), wob(m));
     g.stroke();
 
+    // this run's mountains and twisty bits, hand-drawn along the line
+    g.font = 'bold 15px Georgia, serif'; g.textAlign = 'center';
+    let lastK = '';
+    for (let m = 2; m <= total; m += 2) {
+      const k = kindAt(-m * M);
+      const x = mx(m), y = wob(m);
+      if (k === 'climb' || k === 'shelf' || k === 'pass' || k === 'descent') {
+        g.fillStyle = k === 'pass' || k === 'shelf' ? '#6d4c41' : '#a1887f';
+        g.beginPath(); g.moveTo(x - 7, y - 12); g.lineTo(x, y - 30); g.lineTo(x + 7, y - 12); g.closePath(); g.fill();
+        if (k !== lastK && (k === 'pass' || k === 'shelf')) { g.fillStyle = '#3e2410'; g.fillText(k === 'pass' ? 'narrow pass' : 'cliff road', x, y - 38); }
+      } else if (k === 'twisties' && k !== lastK) { g.fillStyle = '#3e2410'; g.fillText('〰 twisty', x + 20, y + 26); }
+      lastK = k;
+    }
+
     // forks: both branches, the untaken one dashed/faded
     for (const f of FORKS) {
       const decided = s.route[f.id] !== -1;
@@ -74,7 +90,8 @@ export class MapView {
       g.fillText(label, x, y + 32);
     };
     pin(0, 'LA rental lot', '#90a4ae');
-    for (const [m, n] of STOPS) pin(m, n, '#f0ad4e');
+    const L = runLayout();
+    for (const [m, n] of [[L.rusty, "Rusty's Oasis"], [L.lastChance, 'Last Chance Gas']] as const) pin(m, n, '#f0ad4e');
     pin(total, '💒 Chapel', '#f06292');
     g.fillText(`mile ${total}`, mx(total), wob(total) + 52);
 

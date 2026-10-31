@@ -14,8 +14,9 @@ import { CanyonSim } from '../world/Canyon';
 import { EncounterSim, newEncState } from '../road/Encounters';
 import { CHARM2_QUOTES, CHARM_QUOTES } from '../rv/charmQuotes';
 import { GROOM, Groom } from './Groom';
-import { LANE_OFFSET, PILE_ROCKS, ROAD_HALF, roadPoint, baseX, chunkRocks, clearHazardsBeyond, hazardsNear, onRoad, roadX, roadYaw } from '../world/World';
+import { LANE_OFFSET, PILE_ROCKS, ROAD_HALF, roadPoint, baseX, chunkRocks, clearHazardsBeyond, groundY, hazardsNear, onRoad, railAt, roadDX, roadFrame, roadHalf, roadS, roadX, roadYaw } from '../world/World';
 import { FORKS, branchAt, chapelZ, chosen, forkZ, routeOffset, setRouteChoices } from '../world/Route';
+import { shapeSeed } from '../world/RoadShape';
 import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
 
 const totalMilesWith = (route: number[]) => CFG.ROUTE_MILES + FORKS.reduce((a, f) => a + f.branches[Math.max(0, route[f.id])].delta, 0);
@@ -63,6 +64,7 @@ export class HostSim implements StopHost {
       cab: { stoveOn: false, fire: 0, smoke: 0, fuseOut: false, flat: -1, nuts: 0, brew: 0, fridge: [['soda', 0], ['water', 0], ['water', 0]], fridgeT: 0 },
       rusty: newRustyState(),
       stops: {},
+      seed: shapeSeed(),
       route: FORKS.map(() => -1),
       weather: { storm: 0, wind: 0 },
       npcs: [],
@@ -656,6 +658,39 @@ export class HostSim implements StopHost {
     rv.grime = Math.min(1, rv.grime + w.storm * dt * 0.035);
   }
 
+  private railCd = 0;
+  /** Solid guardrails on shelves, passes and tight bends: push back, redirect along the rail, scrape. */
+  private collideRails(dt: number) {
+    const rv = this.s.rv;
+    this.railCd = Math.max(0, this.railCd - dt);
+    if (!(railAt(rv.z) | railAt(rv.z - 6) | railAt(rv.z + 6))) return;
+    const c = Math.cos(rv.yaw), sn = Math.sin(rv.yaw);
+    for (const side of [-1, 1] as const) {
+      const bit = side < 0 ? 1 : 2;
+      let worst = 0;
+      for (const lx of [-RV.halfW, RV.halfW]) for (const lz of [RV.noseZ, RV.zRear]) {
+        const wx = rv.x + lx * c + lz * sn, wz = rv.z - lx * sn + lz * c;
+        const fr = roadFrame(wx, wz);
+        if (!(railAt(fr.s) & bit)) continue;
+        worst = Math.max(worst, side * fr.off - (roadHalf(fr.s) + 1.85));
+      }
+      if (worst <= 0) continue;
+      const s0 = roadS(rv.x, rv.z), dx = roadDX(s0), len = Math.hypot(1, dx), ry = roadYaw(s0);
+      rv.x -= (side * worst) / len; rv.z -= (side * -dx * worst) / len; // back along the road's right normal
+      const vn = Math.max(0, side * rv.speed * Math.sin(ry - rv.yaw)); // speed into the rail
+      let rel = rv.yaw - ry; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+      if (Math.abs(rel) < Math.PI / 2) rv.yaw = ry + rel * 0.4; // redirect along the rail
+      rv.speed *= Math.max(0.55, 1 - vn * 0.03 - dt * 0.6);
+      if (vn > 1.5 && this.railCd <= 0) {
+        this.railCd = 0.5;
+        const mag = Math.min(1.2, vn / 14);
+        rv.integrity = Math.max(0, rv.integrity - Math.min(6, 1 + vn * 0.3));
+        this.sfx(vn > 8 ? 'bang' : 'scrape'); this.joltAll(mag); if (vn > 6) this.hurtStanding(mag * 0.6);
+        this.once('rail' + Math.floor(this.t / 20), vn > 8 ? '💥 SMASHED into the guardrail' : '⚙️ Scraping the guardrail…');
+      } else if (vn > 0.2 && this.railCd <= 0) { this.railCd = 0.4; this.sfx('scrape'); }
+    }
+  }
+
   private prevPose = { x: 0, z: 0, yaw: 0 };
   private crashCd = 0;
   private collideStatics(dt: number) {
@@ -722,7 +757,10 @@ export class HostSim implements StopHost {
     const wipers = rv.wipers;
     if (cab.fuseOut) rv.wipers = false;
     const offroad = !onRoad(rv.x, rv.z);
-    for (const e of stepRV(rv, this.aux, input, dt, offroad)) {
+    // hill under the RV: rise between the axles along its heading (same sampling as the RV model)
+    const fc = Math.cos(rv.yaw), fs = Math.sin(rv.yaw);
+    const slope = (groundY(rv.x - fs * 2.6, rv.z - fc * 2.6) - groundY(rv.x + fs * 2.6, rv.z + fc * 2.6)) / 5.2;
+    for (const e of stepRV(rv, this.aux, input, dt, offroad, slope)) {
       if (e === 'stall') { this.sfx('stall'); this.toast('Stalled! Shift down and turn the key.'); }
       else if (e === 'nofuel') this.toast('Out of gas!');
       else if (e === 'overheat') this.toast('🌡️ Radiator overheating! Ease off or add coolant (front grille)');
@@ -763,6 +801,7 @@ export class HostSim implements StopHost {
 
     // ---------- stop buildings: the RV can't drive through them ----------
     this.collideStatics(dt);
+    this.collideRails(dt);
 
     // ---------- props ----------
     this.fixSlots();

@@ -4,7 +4,7 @@ import { bonk, inRV, stepChase, type ChaseHost } from '../stops/chase';
 import { obbMtv } from '../stops/geom';
 import type { NPCState } from '../types';
 import { KINDS } from '../items/Items';
-import { LANES, ROAD_HALF, SPEED_LIMIT, radarsNear, noLimitAt, roadDX, roadPoint, roadX, roadYaw } from '../world/World';
+import { LANES, ROAD_HALF, SPEED_LIMIT, advisoryAt, lanesAt, radarsNear, noLimitAt, roadDX, roadPoint, roadX, roadYaw } from '../world/World';
 
 export const NPC_DIMS: Record<NPCState['k'], [number, number]> = { // half width, half length
   sedan: [0.9, 2.2], pickup: [1.0, 2.5], camper: [1.15, 3.0], cop: [0.95, 2.4], shark: [0.95, 2.3], semi: [1.25, 4.6], bandit: [1.0, 2.5],
@@ -97,10 +97,11 @@ export class TrafficSim {
     const R = this.rvRoad();
     for (let attempt = 0; attempt < 6; attempt++) {
       const roll = Math.random();
-      const lane = roll < 0.5 ? 2 : roll < 0.82 ? 1 : 0; // most traffic keeps right
       // same direction: mostly ahead at a range of speeds, some faster ones from behind
       const behind = dir === 1 && Math.random() < 0.3;
       const z = dir === 1 ? (behind ? R.z + 350 + Math.random() * 450 : R.z - 550 - Math.random() * 900) : R.z - 700 - Math.random() * 900;
+      // most traffic keeps right; on a narrow stretch only the lanes that exist there
+      const lane = Math.min(roll < 0.5 ? 2 : roll < 0.82 ? 1 : 0, Math.max(0, Math.round(lanesAt(z) - 0.4) - 1));
       const base = lane === 0 ? 55 : lane === 1 ? 47 : 39; // m/s: ~123 / 105 / 87 mph
       const cruise = dir === -1 ? 40 + Math.random() * 20 : behind ? 62 + Math.random() * 10 : base + Math.random() * 8;
       const off = laneOff(dir, lane);
@@ -184,10 +185,23 @@ export class TrafficSim {
       if (overlaps(R.off, hw + RV.halfW + 0.3)) {
         consider(this.ahead(n, L.dir, R.z) - NPC_DIMS[n.k][1] - 3.9, L.dir === 1 ? rv.speed : -rv.speed);
       }
+      // the road narrows ahead (mountain pass / shelf): my lane ends, so treat its end like a stopped car
+      // until I've merged inward; bends ahead set a speed (a little over the yellow sign)
+      const look = (dd: number) => L.s - L.dir * dd;
+      // already past the end of my lane (spawned there, or got pushed): squeeze over now
+      const here = Math.max(1, Math.round(lanesAt(L.s) - 0.4));
+      if (L.lane >= here) L.lane = here - 1;
+      let openAhead = 3, adv = Infinity, ends = false;
+      for (let dd = 0; dd <= 420; dd += 20) {
+        const ln = lanesAt(look(dd));
+        if (ln < L.lane + 0.6 && !ends) { ends = true; if (dd > 0) consider(dd - NPC_DIMS[n.k][1] - 8, 0); }
+        openAhead = Math.min(openAhead, Math.round(ln - 0.4));
+        if (dd <= 220) adv = Math.min(adv, advisoryAt(look(dd)));
+      }
 
       // lane changes (only within my side of the road)
       if (L.changeCd <= 0 && Math.abs(L.off - laneOff(L.dir, L.lane)) < 0.2) {
-        const free = (l: number) => l >= 0 && l < LANES.length && this.laneClear(L.dir, laneOff(L.dir, l), n.z, 45, 150, hw, n);
+        const free = (l: number) => l >= 0 && l < Math.min(LANES.length, openAhead) && this.laneClear(L.dir, laneOff(L.dir, l), n.z, 45, 150, hw, n);
         const pref = L.cruise > 53 ? 0 : L.cruise > 45 ? 1 : 2; // fast cars like the inside lane
         if (gap < 130 && leaderSpeed < L.cruise - 2) {
           // blocked by someone slow: overtake on the inside if it's clear, else try the other side
@@ -199,7 +213,7 @@ export class TrafficSim {
       }
 
       // speed: cruise, never faster than we can stop within the gap
-      const target = Math.min(L.cruise, safe);
+      const target = Math.min(L.cruise, safe, adv * 1.1);
       n.speed += Math.sign(target - n.speed) * Math.min(Math.abs(target - n.speed), (target > n.speed ? 3.2 : 9) * dt);
 
       // smooth lateral motion toward the lane center (eased so cars steer, not slide)

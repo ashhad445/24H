@@ -2,7 +2,7 @@
 import { RV } from '../config';
 import type { Boulder, SharedState } from '../types';
 import { branchAt } from './Route';
-import { ROAD_HALF, roadPoint } from './World';
+import { roadHalf, roadPoint, wallAt } from './World';
 
 export interface CanyonHost {
   s: SharedState;
@@ -24,20 +24,26 @@ export class CanyonSim {
   step(dt: number) {
     const s = this.h.s, rv = s.rv;
     const canyon = !!branchAt(rv.z)?.canyon;
-    if (canyon && Math.abs(rv.speed) > 3) {
+    // cliff shelves on the seeded road shed rocks too (less often), always from the wall side
+    const wall = wallAt(rv.z - 160);
+    if ((canyon || Math.abs(wall) > 0.5) && Math.abs(rv.speed) > 3) {
       this.next -= dt;
-      if (this.next <= 0) { this.next = 20 + Math.random() * 15; this.drop(); }
+      if (this.next <= 0) {
+        if (canyon) { this.next = 20 + Math.random() * 15; this.drop(); }
+        else { this.next = 16 + Math.random() * 18; this.drop(undefined, undefined, Math.sign(wall)); }
+      }
     }
     for (const b of s.boulders) this.move(b, dt);
     s.boulders = s.boulders.filter((b) => b.z < rv.z + 150 && b.broken < 8);
   }
 
   /** A boulder breaks off a cliff top 120–220 m ahead and falls toward a random spot on the road. */
-  drop(ahead = 120 + Math.random() * 100, off = (Math.random() * 2 - 1) * (ROAD_HALF - 1.5)) {
+  drop(ahead = 120 + Math.random() * 100, off?: number, fromSide?: number) {
     const s = this.h.s, rv = s.rv;
     const z = rv.z - ahead;
-    const side = Math.random() < 0.5 ? -1 : 1;
-    const [sx, sz] = roadPoint(z, side * (ROAD_HALF + 14));
+    off ??= (Math.random() * 2 - 1) * (roadHalf(z) - 1.5);
+    const side = fromSide || (Math.random() < 0.5 ? -1 : 1);
+    const [sx, sz] = roadPoint(z, side * (roadHalf(z) + (fromSide ? 9 : 14)));
     const [tx, tz] = roadPoint(z, off);
     const y = 26 + Math.random() * 10, r = 1.0 + Math.random() * 0.8;
     const tf = Math.sqrt((2 * (y - r)) / G);
