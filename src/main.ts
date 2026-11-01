@@ -1,6 +1,6 @@
 // Boot, lobby, and the main loop. The host runs HostSim; everyone renders the shared state.
 import * as THREE from 'three';
-import { CFG, DEV, PLAYER, gearInfo } from './config';
+import { CFG, DEV, PLAYER, RV as RVDIM, gearInfo } from './config';
 import { Input } from './core/Input';
 import { Assets } from './core/AssetLoader';
 import { Sound } from './core/Sound';
@@ -31,7 +31,7 @@ import { runLobby } from './ui/Lobby';
 import { setupSettings } from './ui/Settings';
 import { Vultures } from './world/Vultures';
 import { CanyonView } from './world/CanyonView';
-import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadPoint, roadX, roadYaw } from './world/World';
+import { LANE_OFFSET, World, clearHazardsBeyond, groundY, nextRadar, onRoad, roadPoint, roadX, roadYaw } from './world/World';
 import { applyRunSeed, newRunSeed } from './world/RunSeed';
 import { RockPiles } from './world/RockPiles';
 import { Graphics } from './fx/Graphics';
@@ -276,18 +276,42 @@ async function start() {
   camera.fov = fov; camera.updateProjectionMatrix();
   const camRight = new THREE.Vector3();
 
+  /** Prompt + id for an interactable (shared by the reticle and the dev `nearby` listing). */
+  const describe = (id: string, held: ItemState | undefined): { id: string; prompt: string; hull: boolean } => {
+    const ctx = { held: held?.k ?? '', cab: shared.cab };
+    if (id.startsWith('item:')) {
+      const t = shared.items.find((i) => i.id === Number(id.slice(5)));
+      if (!t || t.h !== -1) return { id: '', prompt: '', hull: false };
+      if (!held) return { id, prompt: `Grab ${itemName(t.k, t.d)}${t.p > 0 ? ` — $${t.p.toFixed(2)} (unpaid)` : ''}`, hull: false };
+      const pair = (x: string, y: string) => (held.k === x && t.k === y) || (held.k === y && t.k === x);
+      if (pair('patty', 'bun') || pair('burger', 'cheese')) return { id, prompt: `Combine with ${itemName(t.k, t.d)}`, hull: false };
+      return { id: '', prompt: '', hull: false };
+    }
+    if (id.startsWith('player:')) {
+      const pid = Number(id.slice(7));
+      if (held && KINDS[held.k]?.food) return { id, prompt: `Feed ${nameOf(pid)} the ${itemName(held.k, held.d)}`, hull: false };
+      if (!held && pid === shared.seats.driver) return { id, prompt: `Slap ${nameOf(pid)} awake`, hull: false };
+      return { id: '', prompt: '', hull: false };
+    }
+    if (id.startsWith('rocks:')) return { id, hull: false, prompt: held ? 'Hands full — drop it first' : '🪨 Grab a rock (throw them at the cops from the rear window)' };
+    if (id === 'bandit') return shared.bandits.phase === 2 ? { id, hull: false, prompt: held ? `Toss the bandits your ${itemName(held.k, held.d)} (fed bandits only take half)` : '🤠 "WHATCHA GOT FOR US?" (hand them food)' } : { id: '', prompt: '', hull: false };
+    if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : held ? `Offer Roscoe your ${itemName(held.k, held.d)} (bribe?)` : 'ROSCOE: "Card, please." (or try a cheeseburger)' };
+    const prompt = id.startsWith('enc:') ? encView.promptFor(id, shared, held?.k ?? '') : id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
+    return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
+  };
+
   /** What the reticle is on: an interactable id, plus whether it's bare RV hull. */
   const lookAt = (held: ItemState | undefined): { id: string; prompt: string; hull: boolean } => {
     camera.updateMatrixWorld(true);
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     raycaster.far = PLAYER.reach;
-    const ctx = { held: held?.k ?? '', cab: shared.cab };
     for (const hit of raycaster.intersectObjects([rv.root, dyn, rusty.group, stopsView.root, rockPiles.group, encView.root], true)) {
       const o = hit.object;
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (!seen(o)) continue; // raycasts ignore .visible, so hidden things (Roscoe off-duty) must be skipped here
       if (o.type === 'Sprite' || (mat && !Array.isArray(mat) && mat.transparent && !o.userData.iid) || isDescendant(o, camera)) continue;
       const id: string = o.userData.iid ?? '';
+      if (id) return describe(id, held);
       if (!id) {
         const hull = isDescendant(o, rv.root);
         if (hull && held && (held.k === 'hammer' || held.k === 'tape')) {
@@ -295,25 +319,6 @@ async function start() {
         }
         return { id: '', prompt: '', hull };
       }
-      if (id.startsWith('item:')) {
-        const t = shared.items.find((i) => i.id === Number(id.slice(5)));
-        if (!t || t.h !== -1) return { id: '', prompt: '', hull: false };
-        if (!held) return { id, prompt: `Grab ${itemName(t.k, t.d)}${t.p > 0 ? ` — $${t.p.toFixed(2)} (unpaid)` : ''}`, hull: false };
-        const pair = (x: string, y: string) => (held.k === x && t.k === y) || (held.k === y && t.k === x);
-        if (pair('patty', 'bun') || pair('burger', 'cheese')) return { id, prompt: `Combine with ${itemName(t.k, t.d)}`, hull: false };
-        return { id: '', prompt: '', hull: false };
-      }
-      if (id.startsWith('player:')) {
-        const pid = Number(id.slice(7));
-        if (held && KINDS[held.k]?.food) return { id, prompt: `Feed ${nameOf(pid)} the ${itemName(held.k, held.d)}`, hull: false };
-        if (!held && pid === shared.seats.driver) return { id, prompt: `Slap ${nameOf(pid)} awake`, hull: false };
-        return { id: '', prompt: '', hull: false };
-      }
-      if (id.startsWith('rocks:')) return { id, hull: false, prompt: held ? 'Hands full — drop it first' : '🪨 Grab a rock (throw them at the cops from the rear window)' };
-      if (id === 'bandit') return shared.bandits.phase === 2 ? { id, hull: false, prompt: held ? `Toss the bandits your ${itemName(held.k, held.d)} (fed bandits only take half)` : '🤠 "WHATCHA GOT FOR US?" (hand them food)' } : { id: '', prompt: '', hull: false };
-      if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : held ? `Offer Roscoe your ${itemName(held.k, held.d)} (bribe?)` : 'ROSCOE: "Card, please." (or try a cheeseburger)' };
-      const prompt = id.startsWith('enc:') ? encView.promptFor(id, shared, held?.k ?? '') : id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
-      return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
     }
     return { id: '', prompt: '', hull: false };
   };
@@ -544,6 +549,74 @@ async function start() {
     v.y += speed > 20 ? 0.8 : speed > 2 ? 1.5 : 0;
     net.toHost({ t: 'drop', inRV: player.inRV, p: [p.x, p.y, p.z], v: [v.x, v.y, v.z] });
   };
+
+  // ---------- dev hooks for scripted / agent playtests (only with ?dev) ----------
+  if (DEV) {
+    const roots = () => [rv.root, dyn, rusty.group, stopsView.root, rockPiles.group, encView.root];
+    const heldNow = () => shared.items.find((i) => i.h === net.myId && i.sl === (shared.crew[net.myId]?.slot ?? 0));
+    const find = (id: string) => { let hit: THREE.Object3D | null = null; for (const r of roots()) r.traverse((o) => { if (!hit && o.userData.iid === id && seen(o)) hit = o; }); return hit as THREE.Object3D | null; };
+    const centre = (o: THREE.Object3D) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3());
+    Object.assign((window as any).game, {
+      /** Interactables within r metres of the eye: id, what the reticle prompt would say, distance, inside the RV? */
+      nearby(r = 8) {
+        const eye = camera.getWorldPosition(new THREE.Vector3()), out = new Map<string, { id: string; prompt: string; d: number; inRV: boolean }>();
+        const held = heldNow();
+        for (const root of roots()) root.traverse((o) => {
+          const id: string = o.userData.iid; if (!id || out.has(id) || !seen(o) || (o as THREE.Mesh).isMesh !== true) return;
+          if (id === `player:${net.myId}`) return;
+          const d = centre(o).distanceTo(eye); if (d > r) return;
+          const p = describe(id, held); if (!p.prompt) return;
+          out.set(id, { id, prompt: p.prompt, d: Math.round(d * 10) / 10, inRV: isDescendant(o, rv.root) });
+        });
+        return [...out.values()].sort((a, b) => a.d - b.d);
+      },
+      /** Walk up to an interactable (teleport-walk; inside the RV or up to 120 m away outside) and face it. */
+      goto(id: string) {
+        const o = find(id); if (!o) return 'not found / not visible: ' + id;
+        if (player.seat) act('stand');
+        const P = centre(o), eye = camera.getWorldPosition(new THREE.Vector3());
+        if (P.distanceTo(eye) > 120) return `too far (${Math.round(P.distanceTo(eye))} m) — get the RV closer first`;
+        player.vel.set(0, 0, 0);
+        if (isDescendant(o, rv.root)) {
+          const L = rv.root.worldToLocal(P.clone());
+          if (!player.inRV) player.setInRV(true);
+          const tx = THREE.MathUtils.clamp(L.x, -RVDIM.innerHalfW + 0.35, RVDIM.innerHalfW - 0.35), tz = THREE.MathUtils.clamp(L.z, RVDIM.zFront + 0.5, RVDIM.zRear - 0.4);
+          // stand ~0.7 m off it, toward the aisle
+          const ax = tx * 0.35, dx = tx - ax, dz = 0.0001; const len = Math.hypot(dx, dz) || 1;
+          player.pos.set(ax + (dx / len) * Math.max(0, len - 0.7), RVDIM.floorY, tz);
+          player.yaw = Math.atan2(-(L.x - player.pos.x), -(L.z - player.pos.z));
+          player.pitch = Math.atan2(L.y - (RVDIM.floorY + PLAYER.eye), Math.hypot(L.x - player.pos.x, L.z - player.pos.z));
+        } else {
+          if (player.inRV) player.setInRV(false);
+          const dir = new THREE.Vector3(P.x - eye.x, 0, P.z - eye.z); const len = dir.length() || 1; dir.divideScalar(len);
+          const sx = P.x - dir.x * 1.1, sz = P.z - dir.z * 1.1;
+          player.pos.set(sx, groundY(sx, sz) + 0.05, sz);
+          player.yaw = Math.atan2(-(P.x - sx), -(P.z - sz));
+          player.pitch = Math.atan2(P.y - (player.pos.y + PLAYER.eye), 1.1);
+        }
+        return 'ok';
+      },
+      /** Interact with something within reach (like E / LMB / RMB on it). Rusty's car heists play the minigame with ~75% skill. */
+      use(id: string, btn = 0) {
+        const o = find(id); if (!o) return 'not found / not visible: ' + id;
+        const d = centre(o).distanceTo(camera.getWorldPosition(new THREE.Vector3()));
+        if (d > 4.5) return `out of reach (${d.toFixed(1)} m) — goto it first`;
+        const hc = /^rusty:(?:car(\d+)|suv)$/.exec(id);
+        if (hc) { const i = hc[1] ? Number(hc[1]) : 1; act(`rusty:car${i}:${Math.random() < 0.75 ? 'ok' : 'fail'}`); return 'minigame played'; }
+        act(id, btn); return 'ok';
+      },
+      /** Use the item in hand on yourself / the world (eat, scratch, open, spray at the stove fire). */
+      useHeld() {
+        const h = heldNow(); if (!h) return 'empty hands';
+        if (h.k === 'extinguisher') { for (let k = 0; k < 15; k++) setTimeout(() => act('spray', 1), k * 200); return 'spraying 3 s'; }
+        if (KINDS[h.k]?.food || h.k === 'scratch' || h.k === 'suitcase') { act('self'); return 'ok'; }
+        return 'nothing to do with ' + h.k + ' by itself — use it on something';
+      },
+      drop: (speed = 1.2) => { if (!heldNow()) return 'empty hands'; dropHeld(speed); return 'ok'; },
+      held: () => { const h = heldNow(); return h ? itemName(h.k, h.d) : null; },
+      hud, itemName, nameOf,
+    });
+  }
 
   // rAF drives rendering; a watchdog keeps the sim alive when frames stop (background tab)
   const frameLoop = () => { requestAnimationFrame(frameLoop); tick(true); };
