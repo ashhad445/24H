@@ -49,6 +49,7 @@ export class HostSim implements StopHost {
   private hornCd = 0;
   private hammerCd = new Map<number, number>();
   private warned = new Set<string>();
+  private offT = 0;
   private lowHp = new Set<number>();
   /** Seconds of blowout immunity after a flat (so tires don't pop back-to-back). */
   private tireGrace = 60;
@@ -169,6 +170,7 @@ export class HostSim implements StopHost {
   handle(from: number, m: GameMsg) {
     this.crew(from);
     if (m.t === 'shoot') { this.shoot(from, m.o, m.d); return; }
+    if (m.t === 'act' && typeof m.id !== 'string') return;
     if (m.t === 'act' && m.id.startsWith('slot:')) { const c = this.crew(from); c.slot = (c.slot + Number(m.id.slice(5)) + 3) % 3; return; }
     if (m.t === 'drive') {
       if (from === this.s.seats.driver) { this.drive = m.i; this.driveT = 0; }
@@ -266,7 +268,7 @@ export class HostSim implements StopHost {
       case 'skillet': {
         const inPan = s.items.find((i) => i.s === 'skillet');
         if (held?.k === 'patty' && !inPan) { held.h = -1; held.s = 'skillet'; this.sfx('sizzle'); }
-        else if (held?.k === 'patty') this.toast('Skillet is full');
+        else if (held?.k === 'patty') this.once('skfull' + Math.floor(this.t / 8), 'Skillet is full');
         else if (!held && inPan) { inPan.s = ''; inPan.h = from; }
         break;
       }
@@ -479,6 +481,7 @@ export class HostSim implements StopHost {
 
   private playerAct(from: number, held: ItemState | undefined, target: number) {
     if (held && FOOD_KINDS.has(held.k)) return this.feed(from, target, held);
+    if (held && held.k === 'patty') { this.toast('Not a meal yet — put the patty in a bun first'); return; }
     if (!held && target === this.s.seats.driver) {
       const c = this.crew(target);
       c.hypno = Math.max(0, c.hypno - 0.5);
@@ -604,6 +607,7 @@ export class HostSim implements StopHost {
     this.items.jolt(mag);
     this.emit({ t: 'ev', k: 'jolt', mag });
     this.s.rv.integrity = Math.max(0, this.s.rv.integrity - mag * 0.6);
+    if (mag >= 0.6) this.once('bighit' + Math.floor(this.t / 10), `💥 Hard hit! RV integrity ${Math.round(this.s.rv.integrity)}%`);
     if (mag >= SURV.FUSE_JOLT && !this.s.cab.fuseOut && this.fuseGrace <= 0 && Math.random() < SURV.FUSE_CHANCE) {
       this.s.cab.fuseOut = true; this.fuseGrace = SURV.FUSE_GRACE;
       const f = this.items.spawn('fuse', true, 0.65, 1.8, RV.zRear - 0.25);
@@ -743,6 +747,7 @@ export class HostSim implements StopHost {
     const dc = s.seats.driver !== -1 ? this.crew(s.seats.driver) : null;
     if (dc) {
       if (dc.hunger < SURV.HANGRY_BELOW) input.th = Math.min(1, input.th * (0.75 + 0.4 * Math.sin(this.t * 2.3)));
+      if (dc.hypno > 0.7) this.once('drowsy' + Math.floor(this.t / 40), `😪 ${this.name(s.seats.driver)} is nodding off — coffee, horn or a slap!`);
       if (dc.hypno > 0.4) {
         const k = (dc.hypno - 0.4) / 0.6;
         input.st += (Math.sin(this.t * 0.9) * 0.45 + Math.sin(this.t * 2.7) * 0.2) * k;
@@ -766,7 +771,13 @@ export class HostSim implements StopHost {
       else if (e === 'overheat') this.toast('🌡️ Radiator overheating! Ease off or add coolant (front grille)');
     }
     rv.wipers = wipers;
-    if (offroad && Math.abs(rv.speed) > 10) rv.integrity = Math.max(0, rv.integrity - dt * 0.4);
+    if (offroad && Math.abs(rv.speed) > 10) {
+      this.offT += dt;
+      if (this.offT > 1.5) {
+        rv.integrity = Math.max(0, rv.integrity - dt * 0.15);
+        this.once('offroad' + Math.floor(this.t / 20), '⚠️ Off the road! The desert is shredding the RV — get back on the asphalt');
+      }
+    } else this.offT = Math.max(0, this.offT - dt * 2);
 
     // flat tire: pulls toward the flat side, drags, chews up the RV
     if (cab.flat >= 0) {
