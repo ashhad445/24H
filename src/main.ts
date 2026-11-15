@@ -25,8 +25,9 @@ import { ChapelView } from './stops/ChapelView';
 import { StopsView } from './stops/Stops';
 import { MapView } from './ui/MapView';
 import { FORKS, branchAt, chapelZ, forkZ, progressMiles, setRouteChoices, totalMiles } from './world/Route';
-import type { EncKind, GameMsg, ItemState, Pose, SharedState } from './types';
+import type { EncKind, GameMsg, ItemState, Pose, Receipt, SharedState } from './types';
 import { HUD } from './ui/HUD';
+import { objective } from './ui/Objective';
 import { runLobby } from './ui/Lobby';
 import { setupSettings } from './ui/Settings';
 import { Vultures } from './world/Vultures';
@@ -166,7 +167,10 @@ async function start() {
     else if (m.k === 'fed' && m.to === net.myId) { player.stamina = Math.min(100, Math.max(0, player.stamina + m.stam)); if (m.boost) player.addBoost(...m.boost); }
     else if (m.k === 'puke' && m.to === net.myId) { hud.puke(); hud.hurt(0.3); }
     else if (m.k === 'wake' && m.to === net.myId) setTimeout(() => player.wakeInRV(), 2500); // moved while the screen is black
+    else if (m.k === 'receipt') { receipt = m.r; hud.showReceipt(m.r); }
   };
+  let receipt: Receipt | null = null;
+  let endShown = false, runSaved = false;
 
   if (isHost) {
     // a new road and stop layout every run (before the host builds anything that depends on it)
@@ -191,16 +195,22 @@ async function start() {
   };
   if (host) host.handOf = handOf;
 
+  const applyPose = (from: number, p: Pose) => {
+    let a = avatars.get(from);
+    if (!a) { a = new Avatar(from, nameOf(from), rv, dyn); avatars.set(from, a); }
+    a.setPose(p);
+    poses.set(from, p);
+    host?.crew(from);
+  };
   net.setHandler({
     onMsg(from, m) {
-      if (m.t === 'pose') {
-        let a = avatars.get(from);
-        if (!a) { a = new Avatar(from, nameOf(from), rv, dyn); avatars.set(from, a); }
-        a.setPose(m.p);
-        poses.set(from, m.p);
-        host?.crew(from);
-      } else if (m.t === 'snap') {
-        if (!isHost) { snaps.push({ t: performance.now() / 1000, s: m.s }); if (snaps.length > 30) snaps.shift(); }
+      if (m.t === 'pose') applyPose(from, m.p);
+      else if (m.t === 'snap') {
+        if (isHost) return;
+        snaps.push({ t: performance.now() / 1000, s: m.s }); if (snaps.length > 30) snaps.shift();
+        if (m.p) applyPose(from, m.p); // the host's own pose rides along with the snapshot
+      } else if (m.t === 'chat') {
+        if (typeof m.text === 'string' && m.text) { hud.chat(nameOf(from), m.text.slice(0, 120)); sound.play('buzz'); }
       } else if (m.t === 'ev') {
         if (!isHost) applyEvent(m);
       } else if (host) host.handle(from, m);
@@ -213,7 +223,10 @@ async function start() {
     },
     onHostLeft() { hud.toast('Host left — run over.'); shared.phase = 'ended'; shared.ending = 'The host left the RV.'; },
   });
-  if (!net.solo) hud.toast(isHost ? `Room code: ${net.code} — share it with your crew (Tab)` : `Joined room ${net.code}`);
+  if (!net.solo) {
+    hud.toast(isHost ? `Room code: ${net.code} — share it with your crew (Tab, or Esc → Copy invite link)` : `Joined room ${net.code}`);
+    hud.invite(`${location.origin}${location.pathname}?room=${net.code}`);
+  }
 
   /** Client-side snapshot interpolation of the RV pose. */
   const interpolate = () => {
@@ -255,6 +268,7 @@ async function start() {
   let devEnc = 0;
   let last = performance.now();
   let snapAcc = 0, poseAcc = 0, sprayAcc = 0, holdAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
+  let driveAcc = 0, lastDrive = '', lastPose = '', returnT = 0, chatOpen = false;
   /** Interactions that repeat while the button is held (pumping gas, siphoning). */
   const HOLD_IDS = new Set(['fuelport']);
   /** Clicking a parked car at Rusty's starts a minigame: jerrycan = siphon, empty hands = strip. */
@@ -312,6 +326,10 @@ async function start() {
       if (id.startsWith('rocks:')) return { id, hull: false, prompt: held ? 'Hands full — drop it first' : '🪨 Grab a rock (throw them at the cops from the rear window)' };
       if (id === 'bandit') return shared.bandits.phase === 2 ? { id, hull: false, prompt: held ? `Toss the bandits your ${itemName(held.k, held.d)} (fed bandits only take half)` : '🤠 "WHATCHA GOT FOR US?" (hand them food)' } : { id: '', prompt: '', hull: false };
       if (id === 'roscoe') return { id, hull: false, prompt: held?.k === 'card' ? 'Hand Roscoe the card (pay the ticket)' : held ? `Offer Roscoe your ${itemName(held.k, held.d)} (bribe?)` : 'ROSCOE: "Card, please." (or try a cheeseburger)' };
+      if (id === 'seat_driver' || id === 'seat_nav') {
+        const who = shared.seats[id === 'seat_driver' ? 'driver' : 'nav'];
+        if (who !== -1 && who !== net.myId) return { id: '', hull: false, prompt: `${nameOf(who)} is ${id === 'seat_driver' ? 'driving' : 'navigating'}` };
+      }
       const prompt = id.startsWith('enc:') ? encView.promptFor(id, shared, held?.k ?? '') : id.startsWith('rusty:') ? rusty.promptFor(id, shared, ctx) : id.startsWith('stop:') ? stopsView.promptFor(id, shared, ctx) : rv.promptFor(id, shared.rv, ctx);
       return prompt ? { id, prompt, hull: false } : { id: '', prompt: '', hull: false };
     }
@@ -341,7 +359,34 @@ async function start() {
     rv.root.updateMatrixWorld(true);
 
     const drive = player.update(dt, input, shared, net.myId);
-    if (drive) net.toHost({ t: 'drive', i: drive });
+    if (drive) {
+      // send changes at once, otherwise just often enough to keep the host's input alive
+      const key = `${drive.th}|${drive.br}|${drive.st}|${drive.horn}`;
+      driveAcc += rawDt;
+      if (isHost || key !== lastDrive || driveAcc >= 1 / CFG.DRIVE_HZ) { lastDrive = key; driveAcc = 0; net.toHost({ t: 'drive', i: drive }); }
+    } else lastDrive = '';
+
+    // crew chat
+    if (input.pressed('Enter') && !chatOpen && input.locked) {
+      chatOpen = true;
+      hud.chatPrompt((text) => {
+        chatOpen = false;
+        if (!text) return;
+        hud.chat(nameOf(net.myId), text);
+        net.broadcast({ t: 'chat', text });
+      });
+    }
+
+    // left behind: hold R to catch up with the RV
+    const leftBehind = !player.inRV && !player.seat && shared.phase === 'drive' && Math.hypot(player.pos.x - shared.rv.x, player.pos.z - shared.rv.z) > 80;
+    if (!leftBehind) { if (returnT >= 0) { returnT = -1; hud.returnHint(null); } }
+    else {
+      const unpaid = shared.items.some((i) => i.h === net.myId && i.p > 0);
+      const hunted = shared.cop.foot?.who === net.myId || shared.rusty.cletus.chase?.who === net.myId;
+      returnT = !unpaid && !hunted && input.down('KeyR') ? Math.max(0, returnT) + rawDt : 0;
+      hud.returnHint(unpaid ? 'Pay for (or drop) the unpaid stuff before you can catch up with the RV' : hunted ? "No catching up while you're being chased" : 'Hold R to catch up with the RV', returnT / 1.5);
+      if (returnT >= 1.5) { returnT = 0; hud.blackout(1.6); player.wakeInRV(); hud.toast('You sprinted after the RV and dove through the door.'); }
+    }
 
     // seated / driver shortcuts
     if (player.seat) {
@@ -494,13 +539,41 @@ async function start() {
 
     // networking
     snapAcc += rawDt; poseAcc += rawDt;
-    if (isHost && snapAcc >= 1 / CFG.SNAPSHOT_HZ) { snapAcc = 0; net.broadcast({ t: 'snap', s: shared }); }
-    if (poseAcc >= 1 / CFG.POSE_HZ) { poseAcc = 0; net.broadcast({ t: 'pose', p: player.pose() }); }
+    if (isHost) {
+      // the host's pose rides in the snapshot: one message per tick instead of two
+      if (snapAcc >= 1 / CFG.SNAPSHOT_HZ) { snapAcc = 0; net.broadcast({ t: 'snap', s: shared, p: player.pose() }); }
+    } else {
+      // full rate while moving or looking around, a slow heartbeat while standing still
+      const p = player.pose();
+      const key = `${p.inRV}|${p.x.toFixed(2)}|${p.y.toFixed(2)}|${p.z.toFixed(2)}|${p.yaw.toFixed(2)}|${p.pitch.toFixed(2)}|${p.seat}`;
+      if (poseAcc >= 1 / (key !== lastPose ? CFG.POSE_HZ : CFG.POSE_IDLE_HZ)) { poseAcc = 0; lastPose = key; net.broadcast({ t: 'pose', p }); }
+    }
+
+    // the run just ended: free the mouse and offer a way back in
+    if (shared.phase === 'ended' && !endShown) {
+      endShown = true;
+      document.exitPointerLock?.();
+      mapView.toggle(false);
+      const again = net.solo ? 'solo' : isHost ? 'host' : '';
+      const home = () => { location.href = location.pathname + (DEV ? '?dev' : ''); };
+      hud.endButtons(
+        again ? () => { try { sessionStorage.setItem('rr-again', again); } catch { /* ignore */ } home(); } : null, home,
+        net.solo ? '' : isHost ? 'Play again opens a new room: send the crew the new code.' : 'When the host starts a new run, join with their new room code.',
+      );
+    }
+    if (endShown && receipt && !runSaved) {
+      runSaved = true;
+      try {
+        const runs = JSON.parse(localStorage.getItem('rr-runs') ?? '[]');
+        runs.push({ ending: shared.ending, miles: receipt.miles, total: receipt.total, money: receipt.money, seed: receipt.seed });
+        localStorage.setItem('rr-runs', JSON.stringify(runs.slice(-50)));
+      } catch { /* storage blocked */ }
+    }
 
     const players = [...net.names.entries()].map(([id, n]) =>
       `${n}${id === net.hostId ? ' (host)' : ''}${id === net.myId ? ' ← you' : ''}${shared.seats.driver === id ? ' 🚗' : shared.seats.nav === id ? ' 🗺️' : ''}`);
     hud.update(shared, {
-      prompt: look.prompt,
+      prompt: look.prompt, objective: objective(shared, net.myId, player.seat, nameOf),
       seat: player.seat, locked: input.locked, tab: input.down('Tab'), room: net.solo ? 'SOLO' : net.code, players,
       dt, cam: camAhead ? r.z - camAhead.z : null, myId: net.myId, stamina: player.stamina, boost: player.boost, held: held ? itemName(held.k, held.d) : '', inRV: player.inRV,
       dev: DEV ? `fps ${fps}\n${(Math.abs(shared.rv.speed) * CFG.MPH).toFixed(0)} mph  gear ${gearInfo(shared.rv.gear).name}  rpm ${shared.rv.rpm.toFixed(0)}\nfuel ${shared.rv.fuel.toFixed(2)} gal  temp ${shared.rv.temp.toFixed(0)}°F  grime ${shared.rv.grime.toFixed(2)}  hp ${shared.rv.integrity.toFixed(0)}\nplayer ${player.inRV ? 'RV' : 'world'} ${player.pos.x.toFixed(2)},${player.pos.y.toFixed(2)},${player.pos.z.toFixed(2)}  items ${shared.items.length}` : '',
@@ -548,7 +621,14 @@ async function start() {
   // rAF drives rendering; a watchdog keeps the sim alive when frames stop (background tab)
   const frameLoop = () => { requestAnimationFrame(frameLoop); tick(true); };
   requestAnimationFrame(frameLoop);
-  setInterval(() => { if (performance.now() - last > 150) tick(false); }, 100);
+  // Browsers throttle a hidden tab's own timers to ~1 Hz, which starves the host sim (and everyone's game with it).
+  // A worker's timer isn't throttled, so it drives the watchdog; plain setInterval is the fallback.
+  const watchdog = () => { if (performance.now() - last > 150) tick(false); };
+  try {
+    const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 50)'], { type: 'text/javascript' })));
+    ticker.onmessage = watchdog;
+    ticker.onerror = () => setInterval(watchdog, 100);
+  } catch { setInterval(watchdog, 100); }
 }
 
 // idle render behind the lobby

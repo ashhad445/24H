@@ -43,6 +43,20 @@ export function runLobby(): Promise<Net> {
       go({ join: c });
     };
     $('l-solo').onclick = () => done(Net.solo(name.value.trim() || 'Bean'));
+    // last run, for bragging rights
+    try {
+      const runs: { ending: string; miles: number; total: number; money: number }[] = JSON.parse(localStorage.getItem('rr-runs') ?? '[]');
+      const last = runs[runs.length - 1];
+      if (last) {
+        const wins = runs.filter((r) => /DELIVERED|SHOWDOWN WON/.test(r.ending)).length;
+        $('l-last').textContent = `Last run: ${last.ending.split(' — ')[0]} at mile ${Math.round(last.miles)} of ${last.total}, $${last.money.toFixed(0)} on the card. ${wins} of ${runs.length} runs delivered.`;
+      }
+    } catch { /* storage blocked */ }
+    // "Play again" on the end screen reloads the page and comes straight back in
+    let again = '';
+    try { again = sessionStorage.getItem('rr-again') ?? ''; sessionStorage.removeItem('rr-again'); } catch { /* ignore */ }
+    if (again === 'solo') $('l-solo').click();
+    else if (again === 'host') $('l-host').click();
     code.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('l-join').click(); });
   });
 }

@@ -159,7 +159,7 @@ export interface DriveInput { th: number; br: number; st: number; horn: boolean 
 
 /** Game-level messages carried by the relay. */
 export type GameMsg =
-  | { t: 'snap'; s: SharedState }
+  | { t: 'snap'; s: SharedState; p?: Pose } // p = the host's own pose (saves a message per tick)
   | { t: 'pose'; p: Pose }
   | { t: 'drive'; i: DriveInput }
   | { t: 'act'; id: string; btn: number }
@@ -173,4 +173,14 @@ export type GameMsg =
   | { t: 'ev'; k: 'fade'; to: number; dur: number; ko?: boolean } // ko = knocked out (bat / taser), not Tammy
   | { t: 'ev'; k: 'fed'; to: number; stam: number; boost?: [number, number, number] } // boost: seconds, sprint drain ×, refill ×
   | { t: 'ev'; k: 'puke'; to: number }
-  | { t: 'ev'; k: 'wake'; to: number }; // passed out: wake up on the RV floor
+  | { t: 'ev'; k: 'wake'; to: number } // passed out: wake up on the RV floor
+  | { t: 'ev'; k: 'receipt'; r: Receipt }
+  | { t: 'chat'; text: string }; // crew text chat (sent to everyone, shown with the sender's name)
+
+/** End-of-run receipt + blame board, built by the host from the card ledger. */
+export interface Receipt {
+  lines: [string, string, number][]; // who, what, amount (biggest first)
+  crew: { name: string; spent: number; earned: number; bet: number; won: number }[];
+  awards: string[];
+  money: number; miles: number; total: number; clock: number; seed: number; integrity: number;
+}

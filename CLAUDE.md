@@ -181,11 +181,13 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 | | H | Horn |
 | | Mouse + LMB | Click dash switches / key / shifter |
 | | F | Stand up |
-| Any | Tab | Player list / room code |
-| | Esc | Release mouse / pause menu |
+| On foot, left behind | Hold R | Catch up with the RV (more than 80 m away; not while chased or carrying unpaid goods) |
+| Any | Enter | Crew text chat |
+| | Tab | Player list / room code |
+| | Esc | Release mouse / pause menu (settings, controls list, copy invite link) |
 
 ## 16. HUD (diegetic first)
-Center reticle + context prompt · top‑left clock (countdown to 24:00), odometer, card balance (crimson if < $100 gift line, flashing if < $0), hazard badges · bottom‑left vitals + held item · bottom‑center key hints · top‑right toasts · Tab: room code & players.
+Center reticle + context prompt · top‑center objective line (first-drive walkthrough → how to fix what just broke → next stop and distance; `ui/Objective.ts`) · top‑left clock (countdown to 24:00), odometer, card balance (crimson if < $100 gift line, flashing if < $0), hazard badges · bottom‑left vitals + held item · bottom‑center key hints · top‑right toasts · Tab: room code & players.
 
 ## 17. Audio
 Procedural Web Audio (engine, road, ambience, SFX) + procedural radio stations (Phase 6). Real audio files later. 3D proximity voice (WebRTC, Phase 7), muffled through RV walls.
@@ -215,10 +217,11 @@ Procedural Web Audio (engine, road, ambience, SFX) + procedural radio stations (
     - Durable Objects: 100k requests/day; 13,000 GB-s/day of duration; 5 GB storage (unused).
       - **Incoming WebSocket messages count as 1 request per 20.** Outgoing messages are free.
       - The hub stays in memory while any socket is open. 128 MB × 24 h ≈ 11,000 GB-s, so even round-the-clock play fits.
-    - **The real ceiling is message volume.** Every client sends poses at 20 Hz and the host sends snapshots at 20 Hz.
-      - 4 players ≈ 80+ msg/s ≈ 15k DO requests per hour, so about **6 hours of 4-player play a day**.
-      - 2 players ≈ 12 h/day.
-      - If that bites, lower the pose/snapshot rate or batch messages.
+    - **The real ceiling is message volume** (rates in `CFG`: `SNAPSHOT_HZ`, `POSE_HZ`, `POSE_IDLE_HZ`, `DRIVE_HZ`).
+      - The host sends one message per tick: the 20 Hz snapshot carries its own pose (`snap.p`).
+      - A client sends its pose at 15 Hz while moving or looking around and 2 Hz while still. A client driver sends input changes at once plus a 10 Hz keep-alive (it used to be one message per frame).
+      - Worst case, 4 players all moving with a client driving ≈ 75 msg/s ≈ 13.5k DO requests per hour, so about **7 hours a day**; a typical crew (driver seated, one or two walking) is nearer 50 msg/s, about 11 h/day. These are estimates from the rates, not measured on Cloudflare.
+      - If that bites, lower `SNAPSHOT_HZ` (clients interpolate) or send snapshot deltas.
     - Workers Builds: 3,000 build minutes/month, one build at a time.
 - **Old / alternatives**:
   - `npm run build && npm start` runs the Node relay that serves `dist/` (see above). `render.yaml` remains, but Render now wants a card.
@@ -455,10 +458,23 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Signs** (`roadSigns()`): CURVE xx MPH (from the RV's real steering limit), chevrons on tight bends, % GRADE, TRUCKS USE LOW GEAR, ROAD NARROWS, ONE LANE EACH WAY, FALLING ROCKS. Cliff shelves drop boulders (reuses the canyon rockfall, from the wall side).
   - **Terrain**: lattice rows bend toward a smoothed road frame 25–70 m out so the mesh never folds on tight bends; mountains crowd the road (taller hills, narrower flat corridor), shelf walls and drops are terrain terms plus staggered cliff blocks; steep faces get a banded rock tint. Speed cameras only on straights; road encounters only on flat calm road (straight / sweepers).
   - Paper map shows this run's stop miles and marks mountains, cliff roads, narrow passes and twisty bits.
-### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
+- [x] **Ten quality-of-life upgrades** (tests: `npx tsx scripts/sim-receipt.ts`; two-tab browser run with `?dev`):
+  - **Receipt & Blame Board**: when a run ends the host builds a `Receipt` from the ledger (`HostSim.receipt()`) and sends it once (`ev: receipt`). The end screen shows a paper receipt (lines grouped per player), trip facts, spent / earned / gambling per player, and awards (The Degenerate, Lucky Bean, Big Spender, Breadwinner, The Liability).
+  - **Play again**: end-screen button. Solo and host reload straight into a new run (`sessionStorage rr-again`); the host gets a new room code, so clients rejoin by code. The lobby shows the last run and the delivery count (`localStorage rr-runs`). An in-place restart without a reload is not built.
+  - **Objective line** (`ui/Objective.ts`): see §16.
+  - **Crew chat**: Enter opens a text box; `GameMsg 'chat'` goes to everyone and shows with the sender's name.
+  - **Catch up with the RV**: hold R for 1.5 s when left more than 80 m behind on foot.
+  - **STRANDED ending**: tank empty, RV stopped, no gas in any jerrycan and no stop within 1.5 km for 45 s (a warning toast starts the countdown).
+  - **Background host**: the watchdog that keeps the sim running when frames stop is driven by a Web Worker timer, which hidden tabs don't throttle (falls back to `setInterval`).
+  - **Fewer network messages**: see §18b.
+  - **Seats**: looking at a taken seat says who is in it; "Seat taken" names them.
+  - **Pause menu**: Copy invite link (`?room=CODE`) and a controls list.
+### Phase 7 — Voice chat, cosmetics, player list polish
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑11‑15 — Ten quality-of-life upgrades** (receipt, play again, objective line, chat, catch-up, stranded ending, background host, fewer messages, seat names, invite link). Needs a human playtest like the rest.
+
 **2026‑10‑29 — Phase 6 built**: radio, groom texts, road/ambient audio, juice.
 
 **2026‑10‑29 — Phase 5 complete**: all five new stops built on the stop kit.
@@ -474,8 +490,8 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
 **2026‑10‑28 — Phase 1 playable.**
 - `npm run dev` → open http://localhost:3000 (add `?dev` for debug readout + `window.game` hook). Second player: open another tab, join with the room code (or `?room=CODE`).
 - Headless drivetrain check: `npx tsx scripts/sim-drive.ts` (0–60 ≈ 18 s, ~38 compressed miles per 5 min at 60 MPH, ~5.7 gal per 5 min).
-- Host keeps simulating in background tabs (rAF loop + 100 ms watchdog with substeps). Chrome throttles hidden tabs to ~1 Hz timers, so long host alt-tabs still degrade; a Web Worker sim is the real fix (later).
-- Known gaps: road is flat (no potholes yet); drivers' input has one RTT of latency on clients (no prediction); seat prompt doesn't say who is sitting there.
+- Host keeps simulating in background tabs: rAF loop + a watchdog with substeps, ticked by a Web Worker timer so hidden-tab timer throttling doesn't starve it. Verified by stopping rAF in a browser test; not yet checked against a really hidden Chrome tab over a long alt-tab.
+- Known gaps: drivers' input has one RTT of latency on clients (no prediction).
 
 ## 24. Risks & Open Questions
 | Risk | Mitigation |

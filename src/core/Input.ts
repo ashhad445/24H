@@ -42,7 +42,8 @@ export class Input {
     });
   }
 
-  lock() { this.el.requestPointerLock?.(); }
+  /** Needs a user gesture; without one (e.g. straight after "Play again") the first click locks instead. */
+  lock() { try { void (this.el.requestPointerLock?.() as Promise<void> | undefined)?.catch?.(() => {}); } catch { /* not allowed yet */ } }
 
   down(code: string) { return this.keys.has(code); }
   pressed(code: string) { return this.pressedKeys.has(code); }

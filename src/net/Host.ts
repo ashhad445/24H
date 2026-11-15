@@ -17,7 +17,7 @@ import { GROOM, Groom } from './Groom';
 import { LANE_OFFSET, PILE_ROCKS, ROAD_HALF, roadPoint, baseX, chunkRocks, clearHazardsBeyond, groundY, hazardsNear, onRoad, railAt, roadDX, roadFrame, roadHalf, roadS, roadX, roadYaw } from '../world/World';
 import { FORKS, branchAt, chapelZ, chosen, forkZ, routeOffset, setRouteChoices } from '../world/Route';
 import { shapeSeed } from '../world/RoadShape';
-import type { CrewState, DriveInput, GameMsg, ItemState, SharedState } from '../types';
+import type { CrewState, DriveInput, GameMsg, ItemState, Receipt, SharedState } from '../types';
 
 const totalMilesWith = (route: number[]) => CFG.ROUTE_MILES + FORKS.reduce((a, f) => a + f.branches[Math.max(0, route[f.id])].delta, 0);
 
@@ -136,6 +136,47 @@ export class HostSim implements StopHost {
     this.sfx('cash');
   }
 
+  /** The end-of-run receipt: the ledger grouped per player and line, plus who gets the blame. */
+  receipt(): Receipt {
+    const s = this.s;
+    const GAMBLE = /slot|crab derby|roulette|blackjack|dice|big wheel|claw|coin pusher|scratch/i;
+    type Row = Receipt['crew'][0];
+    const crew = new Map<number, Row>();
+    const lines = new Map<string, [string, string, number]>();
+    for (const e of this.ledger) {
+      const c = crew.get(e.who) ?? { name: this.name(e.who), spent: 0, earned: 0, bet: 0, won: 0 };
+      crew.set(e.who, c);
+      const g = GAMBLE.test(e.what);
+      if (e.amount < 0) c[g ? 'bet' : 'spent'] -= e.amount; else c[g ? 'won' : 'earned'] += e.amount;
+      // "Roulette: $10 on red" and friends collapse into one line per player
+      const what = e.what.replace(/:.*$/, '').replace(/ \(.*$/, '').replace(/ bet on .*$/, '');
+      const key = `${e.who}|${what}|${e.amount < 0 ? '-' : '+'}`;
+      const l = lines.get(key) ?? [c.name, what, 0];
+      l[2] += e.amount; lines.set(key, l);
+    }
+    const rows = [...crew.values()];
+    const top = (f: (c: Row) => number, min: number) => rows.filter((c) => f(c) >= min).sort((a, b) => f(b) - f(a))[0];
+    const awards: string[] = [];
+    const usd = (n: number) => `$${n.toFixed(0)}`;
+    const degen = top((c) => c.bet - c.won, 10), lucky = top((c) => c.won - c.bet, 10), spender = top((c) => c.spent, 20), earner = top((c) => c.earned, 20);
+    if (degen) awards.push(`🎰 The Degenerate: ${degen.name} (down ${usd(degen.bet - degen.won)} gambling)`);
+    if (lucky) awards.push(`🍀 Lucky Bean: ${lucky.name} (up ${usd(lucky.won - lucky.bet)} gambling)`);
+    if (spender) awards.push(`💸 Big Spender: ${spender.name} (${usd(spender.spent)} on the card)`);
+    if (earner) awards.push(`🧽 Breadwinner: ${earner.name} (earned ${usd(earner.earned)})`);
+    const trouble = new Map<number, number>();
+    for (const e of this.ledger) if (/Roscoe|Urgent Care|Robbed a|Fenced/.test(e.what)) trouble.set(e.who, (trouble.get(e.who) ?? 0) + 1);
+    const worst = [...trouble.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (worst) awards.push(`🚔 The Liability: ${this.name(worst[0])} (${worst[1]} run-in${worst[1] > 1 ? 's' : ''} with the law, crime, or the ER)`);
+    return {
+      lines: [...lines.values()].filter((l) => Math.abs(l[2]) >= 0.01 || !/^Gas/.test(l[1])).sort((a, b) => Math.abs(b[2]) - Math.abs(a[2])).slice(0, 14),
+      crew: rows, awards,
+      money: s.money, miles: Math.max(0, -s.rv.z * CFG.MILES_PER_METER), total: totalMilesWith(s.route), clock: s.clock, seed: s.seed, integrity: s.rv.integrity,
+    };
+  }
+  private receiptSent = false;
+  /** Seconds the RV has sat bone dry with no gas anywhere and no stop in walking distance. */
+  private strandedT = 0;
+
   /** A $0 line on the receipt (bribes and other crimes against dignity). */
   log(from: number, what: string) { this.ledger.push({ who: from, what, amount: 0 }); }
 
@@ -212,7 +253,7 @@ export class HostSim implements StopHost {
       case 'seat_nav': {
         const key = id === 'seat_driver' ? 'driver' : 'nav';
         if (s.seats[key] === -1) { this.peerLeft(from); s.seats[key] = from; }
-        else if (s.seats[key] !== from) this.toast('Seat taken!');
+        else if (s.seats[key] !== from) this.toast(`Seat taken — ${this.name(s.seats[key])} is sitting there`);
         break;
       }
       case 'stand':
@@ -729,7 +770,10 @@ export class HostSim implements StopHost {
 
   step(dt: number, accel: { x: number; z: number } = { x: 0, z: 0 }) {
     const s = this.s, rv = s.rv, cab = s.cab;
-    if (s.phase !== 'drive') return;
+    if (s.phase !== 'drive') {
+      if (!this.receiptSent) { this.receiptSent = true; this.emit({ t: 'ev', k: 'receipt', r: this.receipt() }); }
+      return;
+    }
     this.t += dt;
     this.driveT += dt;
     this.hornCd = Math.max(0, this.hornCd - dt);
@@ -860,6 +904,11 @@ export class HostSim implements StopHost {
     this.once('plot', '🌿 THE JOB: get the stash to Kevin\'s wedding before 24:00. Miss it and the Bonetti mafia — who paid for it — comes for you.');
     this.stepMafia(dt);
     if (rv.integrity <= 0) { s.phase = 'ended'; s.ending = 'TOTALED — the RV fell apart in the desert.'; }
+    // stranded: tank empty, stopped, not a drop in any jerrycan, and no stop to walk to
+    if (rv.fuel <= 0.01 && Math.abs(rv.speed) < 0.5 && !s.items.some((i) => i.k === 'jerrycan' && i.d > 0.05) && !this.nearStop(1500)) {
+      if (this.strandedT === 0) this.toast('⛽ Bone dry, no gas in the cans, nothing for miles. If nobody finds fuel in 45 s, this is where the trip ends.');
+      if ((this.strandedT += dt) > 45) { s.phase = 'ended'; s.ending = '🏜️ STRANDED — out of gas in the middle of nowhere. Kevin got married without you. The vultures RSVP\'d yes.'; }
+    } else this.strandedT = 0;
     if (s.clock >= CFG.RUN_HOURS * 3600 && !s.mafia.on) {
       s.mafia.on = true;
       this.toast('⏰ TIME\'S UP. The Bonetti crew has your location. Guns up — or deliver late and pray.');

@@ -3,7 +3,7 @@ import { CFG, ENGINE, NOS, gearInfo } from '../config';
 import { SPEED_LIMIT } from '../world/World';
 import { progressMiles, totalMiles } from '../world/Route';
 import { KINDS, itemIcon, itemName } from '../items/Items';
-import type { ItemState, SharedState, SeatRole } from '../types';
+import type { ItemState, Receipt, SharedState, SeatRole } from '../types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -20,6 +20,7 @@ export class HUD {
     pause: $('pause'), room: $('p-room'), dev: $('dev'),
     hp: $('v-hp'), puke: $('fx-puke'), hunger: $('v-hunger'), stam: $('v-stam'), awake: $('v-awake'), awakeRow: $('v-awake-row'), buzz: $('v-buzz'), hbName: $('hb-name'),
     gearbox: $('gearbox'), gear: $('g-gear'), gspeed: $('g-speed'), grpm: $('g-rpm'),
+    objective: $('objective'), chatLog: $('chat-log'), chatIn: $<HTMLInputElement>('chat-in'), ret: $('return'), retBar: $('return-bar'), receipt: $('receipt'), endNote: $('e-note'), invite: $('p-invite'),
     smoke: $('fx-smoke'), hangry: $('fx-hangry'), lidTop: $('fx-lid-top'), lidBot: $('fx-lid-bot'),
   };
 
@@ -40,6 +41,86 @@ export class HUD {
   readonly texts: string[] = [];
 
   show() { this.el.hud.classList.remove('hidden'); }
+
+  /** A line of crew chat (fades after a while). */
+  chat(who: string, text: string) {
+    const d = document.createElement('div');
+    const b = document.createElement('b'); b.textContent = who;
+    d.append(b, document.createTextNode(text));
+    this.el.chatLog.appendChild(d);
+    setTimeout(() => d.classList.add('out'), 12000);
+    setTimeout(() => d.remove(), 12700);
+    while (this.el.chatLog.children.length > 6) this.el.chatLog.firstChild!.remove();
+  }
+
+  /** Open the chat box; calls back with the typed line ('' = cancelled). */
+  chatPrompt(done: (text: string) => void) {
+    const el = this.el.chatIn;
+    el.value = ''; el.classList.remove('hidden'); el.focus();
+    let open = true;
+    const close = (text: string) => {
+      if (!open) return;
+      open = false; el.onkeydown = null; el.onblur = null; el.classList.add('hidden'); el.blur(); done(text);
+    };
+    el.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') close(el.value.trim());
+      else if (e.key === 'Escape') close('');
+    };
+    el.onblur = () => close('');
+  }
+
+  /** "Hold R to catch up" bar: null hides it, otherwise text + 0..1 progress. */
+  returnHint(text: string | null, k = 0) {
+    this.el.ret.classList.toggle('hidden', text === null);
+    if (text === null) return;
+    this.el.ret.firstElementChild!.textContent = text;
+    this.el.retBar.style.width = `${Math.round(k * 100)}%`;
+  }
+
+  /** The end-of-run receipt and blame board (arrives from the host right after the ending). */
+  showReceipt(r: Receipt) {
+    const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+    const usd = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`;
+    const cls = (n: number) => (n < -0.005 ? 'neg' : n > 0.005 ? 'pos' : '');
+    const line = (a: string, n: number) => `<div class="rc-line ${cls(n)}"><span>${esc(a)}</span><span>${n > 0.005 ? '+' : ''}${usd(n)}</span></div>`;
+    const solo = r.crew.length <= 1;
+    const gift = CFG.WEDDING_MIN_BALANCE;
+    const paper = `<div class="rc-paper"><h3>ROADTRIP ROULETTE</h3><small>shared card · run #${r.seed}</small>`
+      + `<div class="rc-line"><span>Opening balance</span><span>${usd(CFG.START_MONEY)}</span></div><div class="rc-rule"></div>`
+      + (r.lines.length ? r.lines.map(([who, what, n]) => line(solo ? what : `${who}: ${what}`, n)).join('') : '<div class="rc-line"><span>Nobody touched the card.</span><span></span></div>')
+      + `<div class="rc-rule"></div><div class="rc-line rc-total ${r.money < gift ? 'neg' : 'pos'}"><span>LEFT ON THE CARD</span><span>${usd(r.money)}</span></div>`
+      + `<small style="margin-top:8px">${r.money >= gift ? 'Wedding gift covered. Classy.' : r.money >= 0 ? `Under the $${gift} gift line. Awkward.` : 'The Loan Shark sends his regards.'}</small></div>`;
+    const h = Math.floor(r.clock / 3600), m = Math.floor((r.clock % 3600) / 60);
+    const facts = '<div class="rc-card"><h4>The trip</h4><div class="rc-facts">'
+      + `<div><b>${r.miles.toFixed(0)} / ${r.total}</b>miles</div><div><b>${h}h ${String(m).padStart(2, '0')}m</b>on the road</div><div><b>${Math.max(0, Math.round(r.integrity))}%</b>of an RV left</div></div></div>`;
+    const board = r.crew.length ? '<div class="rc-card"><h4>Blame board</h4><table><tr><th>Bean</th><th>Spent</th><th>Earned</th><th>Gambling</th></tr>'
+      + r.crew.map((c) => { const g = c.won - c.bet; return `<tr><td>${esc(c.name)}</td><td class="${c.spent > 0 ? 'neg' : ''}">${usd(-c.spent)}</td><td class="${c.earned > 0 ? 'pos' : ''}">${usd(c.earned)}</td><td class="${cls(g)}">${g > 0.005 ? '+' : ''}${usd(g)}</td></tr>`; }).join('')
+      + '</table></div>' : '';
+    const awards = r.awards.length ? `<div class="rc-card"><h4>Awards nobody wanted</h4>${r.awards.map((a) => `<div class="rc-award">${esc(a)}</div>`).join('')}</div>` : '';
+    this.el.receipt.innerHTML = `${paper}<div class="rc-side">${facts}${board}${awards}</div>`;
+    this.el.receipt.classList.remove('hidden');
+  }
+
+  /** End-screen buttons. `again` = what "Play again" does for this player, or null to hide it. */
+  endButtons(again: (() => void) | null, lobby: () => void, note: string) {
+    const a = $('e-again');
+    a.classList.toggle('hidden', !again);
+    if (again) a.onclick = again;
+    $('e-lobby').onclick = lobby;
+    this.el.endNote.textContent = note;
+  }
+
+  /** Pause-menu invite button (multiplayer only). */
+  invite(url: string) {
+    const b = this.el.invite;
+    b.classList.remove('hidden');
+    b.onclick = () => {
+      const ok = () => { b.textContent = 'Link copied'; setTimeout(() => (b.textContent = 'Copy invite link'), 1800); };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(ok, () => prompt('Invite link', url)); else prompt('Invite link', url);
+    };
+  }
+  private objText = '';
 
   /** Fade to black for `sec` seconds (then ease back in). */
   blackout(sec: number) { this.blackT = sec; }
@@ -127,7 +208,7 @@ export class HUD {
     this.flyEl.textContent = `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)}`;
   }
 
-  update(s: SharedState, opts: { prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
+  update(s: SharedState, opts: { prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; objective: string; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
     const remaining = Math.max(0, CFG.RUN_HOURS * 3600 - s.clock);
     const tod = CFG.START_HOUR * 3600 + s.clock;
     const day = Math.floor(tod / 86400) + 1;
@@ -201,6 +282,15 @@ export class HUD {
     this.el.lidTop.style.height = `${lid * 46}vh`;
     this.el.lidBot.style.height = `${lid * 46}vh`;
 
+    if (opts.objective !== this.objText) {
+      // "… in 12.3 mi" ticks constantly; only pop when the goal itself changes
+      const goal = (t: string) => t.replace(/ in [\d.]+ mi$/, '');
+      const o = this.el.objective;
+      if (goal(opts.objective) !== goal(this.objText)) { o.classList.remove('pop'); void o.offsetWidth; o.classList.add('pop'); }
+      this.objText = opts.objective;
+      o.textContent = opts.objective;
+      o.classList.toggle('hidden', !opts.objective);
+    }
     this.el.reticle.classList.toggle('active', !!opts.prompt);
     this.el.prompt.textContent = opts.prompt;
     this.el.prompt.classList.toggle('hidden', !opts.prompt);
@@ -211,7 +301,7 @@ export class HUD {
         ? 'Mouse look   Click dash   F stand'
         : opts.held
           ? 'E / Click use · combine   Click eat (food) · spray (hold)   G drop   RMB throw   Tab players'
-          : 'WASD move   Shift sprint   Space jump   E / Click grab · interact   Tab players';
+          : 'WASD move   Shift sprint   Space jump   E / Click grab · interact   Enter chat   Tab players';
 
     this.el.pause.classList.toggle('hidden', opts.locked || s.phase === 'ended');
     if (!opts.locked) this.el.room.textContent = opts.room === 'SOLO' ? 'Solo run' : `Room code: ${opts.room}`;

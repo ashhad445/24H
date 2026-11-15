@@ -3,7 +3,9 @@
 export const CFG = {
   RELAY_PORT: 3001,
   SNAPSHOT_HZ: 20,
-  POSE_HZ: 20,
+  POSE_HZ: 15, // avatar poses while moving (remote avatars smooth between them)
+  POSE_IDLE_HZ: 2, // … and while standing still
+  DRIVE_HZ: 10, // driver input keep-alive; changes are sent at once
   INTERP_DELAY: 0.1, // seconds of snapshot buffering on clients
 
   START_MONEY: 200,
