@@ -23,6 +23,8 @@ export class Player {
   boost = { t: 0, drain: 1, regen: 1 };
   private tired = false;
   private bob = 0;
+  /** Advances by π per footstep while walking (main plays the footfalls). */
+  get stepPhase() { return this.bob; }
   private shake = 0;
   private kickP = 0;
   private kickV = 0;

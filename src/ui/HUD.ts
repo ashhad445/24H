@@ -1,5 +1,6 @@
 // Minimal diegetic-first HUD: clock, odometer, card balance, reticle, prompts, toasts.
 import { CFG, ENGINE, NOS, gearInfo } from '../config';
+import { routeMarks } from './Objective';
 import { SPEED_LIMIT } from '../world/World';
 import { progressMiles, totalMiles } from '../world/Route';
 import { KINDS, itemIcon, itemName } from '../items/Items';
@@ -14,7 +15,9 @@ function hhmm(sec: number) {
 
 export class HUD {
   private el = {
-    hud: $('hud'), wedding: $('h-wedding'), time: $('h-time'), miles: $('h-miles'), money: $('h-money'), moneyV: $('h-money-v'), moneyFly: $('h-money-fly'), badges: $('h-badges'),
+    hud: $('hud'), count: $('h-count'), countL: $('h-count-l'), rFill: $('r-fill'), rTicks: $('r-ticks'), rMe: $('r-me'), mFill: $('m-fill'), gift: $('h-gift'), crew: $('crew'), rvstat: $('rvstat'), intro: $('intro'),
+    nHp: $('n-hp'), nHunger: $('n-hunger'), nAwake: $('n-awake'), gFuel: $('g-fuel'), gFuelN: $('g-fuel-n'), gTemp: $('g-temp'), gTempN: $('g-temp-n'), lamps: $('g-lamps'), hotbar: $('hotbar'),
+    wedding: $('h-wedding'), time: $('h-time'), miles: $('h-miles'), money: $('h-money'), moneyV: $('h-money-v'), moneyFly: $('h-money-fly'), badges: $('h-badges'),
     phone: $('phone'), radioCap: $('radio-cap'), hurt: $('fx-hurt'), speedFx: $('fx-speed'), nosFx: $('fx-nos'), flash: $('fx-flash'), black: $('fx-black'), camWarn: $('cam-warn'), nos: $('g-nos'),
     reticle: $('reticle'), prompt: $('prompt'), hints: $('hints'), toasts: $('toasts'), tab: $('tab'), end: $('end'),
     pause: $('pause'), room: $('p-room'), dev: $('dev'),
@@ -41,6 +44,25 @@ export class HUD {
   readonly texts: string[] = [];
 
   show() { this.el.hud.classList.remove('hidden'); }
+
+  /** Full-screen "getting ready" veil between the title screen and the first frame of the run. */
+  loading(on: boolean, tip = '') {
+    const l = $('loading');
+    if (on) { l.classList.remove('hidden', 'out'); $('ld-tip').textContent = tip; }
+    else { l.classList.add('out'); setTimeout(() => l.classList.add('hidden'), 700); }
+  }
+
+  /** Opening title card for a fresh run (fades itself out). */
+  intro() {
+    const i = this.el.intro;
+    i.classList.remove('hidden'); i.style.animation = 'none'; void i.offsetWidth; i.style.animation = '';
+    setTimeout(() => i.classList.add('hidden'), 5200);
+  }
+  private keyed = new Map<HTMLElement, string>();
+  /** Set innerHTML only when it changed (these run every frame). */
+  private html(el: HTMLElement, h: string) { if (this.keyed.get(el) !== h) { this.keyed.set(el, h); el.innerHTML = h; } }
+  private hintKey = '';
+  private hintT = 0;
 
   /** A line of crew chat (fades after a while). */
   chat(who: string, text: string) {
@@ -191,7 +213,7 @@ export class HUD {
     if (this.deltaT > 0 && (this.deltaT -= dt) <= 0) { this.pendingDelta = 0; this.flyEl = null; }
     this.ticker += (v - this.ticker) * Math.min(1, dt * 6);
     if (Math.abs(v - this.ticker) < 0.01) this.ticker = v;
-    this.el.moneyV.textContent = `💳 $${this.ticker.toFixed(2)}`;
+    this.el.moneyV.textContent = `${this.ticker < 0 ? '−' : ''}$${Math.abs(this.ticker).toFixed(2)}`;
   }
   private ticker = 0;
   private showFly() {
@@ -211,47 +233,78 @@ export class HUD {
     this.flyEl.textContent = `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)}`;
   }
 
-  update(s: SharedState, opts: { prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; objective: string; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
+  update(s: SharedState, opts: { crew: { id: number; name: string; color: string }[]; prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; objective: string; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
     const remaining = Math.max(0, CFG.RUN_HOURS * 3600 - s.clock);
     const tod = CFG.START_HOUR * 3600 + s.clock;
     const day = Math.floor(tod / 86400) + 1;
-    this.el.wedding.textContent = s.mafia.on ? '💀 MAFIA ON YOUR TAIL' : `🌿 Deliver the stash in ${hhmm(remaining)}`;
+    const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+    this.el.count.textContent = s.mafia.on ? 'LATE' : hhmm(remaining);
+    this.el.countL.textContent = s.mafia.on ? 'the mafia is on your tail' : 'to the wedding';
     this.el.wedding.classList.toggle('urgent', remaining < 3 * 3600);
-    this.el.time.textContent = `🕗 ${hhmm(tod % 86400)} · Day ${day}`;
-    this.el.miles.textContent = `🛣️ Mile ${progressMiles(s.rv.z).toFixed(1)} / ${totalMiles()}`;
+    this.el.time.textContent = `${hhmm(tod % 86400)} · Day ${day}`;
+    const total = totalMiles(), here = progressMiles(s.rv.z), frac = Math.min(1, Math.max(0, here / total));
+    this.el.miles.textContent = `Mile ${here.toFixed(1)} of ${total}`;
+    this.el.rFill.style.width = `${frac * 100}%`;
+    this.el.rMe.style.left = `${frac * 100}%`;
+    this.html(this.el.rTicks, routeMarks(s).map((m) => `<i class="${m.kind}${m.at <= frac ? ' done' : ''}" style="left:${(m.at * 100).toFixed(2)}%" title="${esc(m.label)}"></i>`).join(''));
     this.money(s.money, opts.dt);
-    this.el.money.classList.toggle('low', s.money < CFG.WEDDING_MIN_BALANCE);
+    const gift = CFG.WEDDING_MIN_BALANCE;
+    this.el.money.classList.toggle('low', s.money < gift);
     this.el.money.classList.toggle('overdraft', s.money < 0);
-    this.el.money.title = `Need $${CFG.WEDDING_MIN_BALANCE} for the wedding gift`;
+    this.el.mFill.style.width = `${Math.min(100, Math.max(0, s.money / (gift * 2)) * 100)}%`;
+    this.el.gift.textContent = s.money < 0 ? 'Overdrawn: the Loan Shark is coming' : s.money < gift ? `$${(gift - s.money).toFixed(0)} short of the $${gift} gift` : `$${(s.money - gift).toFixed(0)} to spare above the $${gift} gift`;
 
-    const badges: string[] = [];
-    if (s.cab.fire > 0) badges.push('🔥 Grease fire');
-    if (s.cab.fuseOut) badges.push('⚡ Fuse out');
-    if (s.cab.flat >= 0) badges.push('🛞 Flat tire');
-    if (s.rv.integrity < 60) badges.push(`🔧 RV ${Math.round(s.rv.integrity)}%`);
-    if (s.weather.storm > 0.3) badges.push('🌪️ Sandstorm');
-    if (s.rv.steam) badges.push('🌡️ Overheating');
-    if (s.rv.fuel < 3) badges.push('⛽ Low fuel');
-    if (s.rv.ignition === 0 && s.seats.driver !== -1) badges.push('🔑 Engine off');
-    if (s.shark.on) badges.push('🦈 LOAN SHARK — get the card above $0!');
-    if (s.cop.phase === 1 || s.cop.phase === 2) badges.push('🚔 Roscoe on your tail — stop to pull over');
-    else if (s.cop.phase === 3) badges.push('🤠 Roscoe at the driver window — hand him the card');
-    else if (s.heat > 0) badges.push(`🚔 Heat ${s.heat}`);
-    this.el.badges.textContent = badges.join('  ');
+    // status chips: [severity, text]
+    const badges: [string, string][] = [];
+    if (s.cab.fire > 0) badges.push(['bad', '🔥 Grease fire']);
+    if (s.shark.on) badges.push(['bad', '🦈 Loan Shark: get the card above $0']);
+    if (s.cop.phase === 1 || s.cop.phase === 2) badges.push(['bad', '🚔 Roscoe on your tail: stop to pull over']);
+    else if (s.cop.phase === 3) badges.push(['bad', '🤠 Roscoe at the window: hand him the card']);
+    else if (s.heat > 0) badges.push(['warn', `🚔 Heat ${s.heat}`]);
+    if (s.rv.steam) badges.push(['bad', '🌡️ Overheating']);
+    if (s.cab.flat >= 0) badges.push(['bad', '🛞 Flat tire']);
+    if (s.cab.fuseOut) badges.push(['warn', '⚡ Fuse out']);
+    if (s.rv.fuel < 3) badges.push([s.rv.fuel < 1 ? 'bad' : 'warn', `⛽ Low fuel (${s.rv.fuel.toFixed(1)} gal)`]);
+    if (s.rv.integrity < 60) badges.push([s.rv.integrity < 30 ? 'bad' : 'warn', `🔧 RV ${Math.round(s.rv.integrity)}%`]);
+    if (s.weather.storm > 0.3) badges.push(['info', '🌪️ Sandstorm']);
+    if (s.rv.ignition === 0 && s.seats.driver !== -1) badges.push(['info', '🔑 Engine off']);
+    this.html(this.el.badges, badges.map(([c, t]) => `<span class="${c}">${t}</span>`).join(''));
 
-    // gear readout for the driver
+    // driver cluster
+    const rv = s.rv, mphNow = Math.round(Math.abs(rv.speed) * CFG.MPH);
     this.el.gearbox.classList.toggle('hidden', opts.seat !== 'driver');
     if (opts.seat === 'driver') {
-      const on = s.rv.ignition === 2;
-      this.el.gear.textContent = on ? gearInfo(s.rv.gear).name : s.rv.ignition === 1 ? '…' : 'OFF';
+      const on = rv.ignition === 2;
+      this.el.gear.textContent = on ? gearInfo(rv.gear).name : rv.ignition === 1 ? '…' : 'OFF';
       this.el.gear.classList.toggle('off', !on);
-      this.el.gear.classList.toggle('rev', on && s.rv.gear === -1);
-      this.el.gspeed.textContent = `${Math.round(Math.abs(s.rv.speed) * CFG.MPH)} mph`;
-      this.el.nos.textContent = `NOS ${'●'.repeat(s.rv.nos)}${'○'.repeat(Math.max(0, NOS.CHARGES - s.rv.nos))}${s.rv.nosT > 0 ? ' 🔥' : '  [N]'}`;
-      this.el.nos.classList.toggle('burn', s.rv.nosT > 0);
-      this.el.nos.classList.toggle('dry', s.rv.nos <= 0 && s.rv.nosT <= 0);
-      this.el.grpm.style.width = `${Math.min(100, (s.rv.rpm / ENGINE.REDLINE) * 100)}%`;
+      this.el.gear.classList.toggle('rev', on && rv.gear === -1);
+      this.el.gspeed.textContent = String(mphNow);
+      this.el.nos.textContent = `NOS ${'●'.repeat(rv.nos)}${'○'.repeat(Math.max(0, NOS.CHARGES - rv.nos))}${rv.nosT > 0 ? ' 🔥' : ' N'}`;
+      this.el.nos.classList.toggle('burn', rv.nosT > 0);
+      this.el.nos.classList.toggle('dry', rv.nos <= 0 && rv.nosT <= 0);
+      const rev = Math.min(1, rv.rpm / ENGINE.REDLINE);
+      this.el.grpm.style.width = `${rev * 100}%`;
+      this.el.grpm.classList.toggle('red', rev > 0.92);
+      this.el.gFuel.style.width = `${Math.min(100, (rv.fuel / CFG.FUEL_CAPACITY) * 100)}%`;
+      this.el.gFuel.classList.toggle('low', rv.fuel < 3);
+      this.el.gFuelN.textContent = `${rv.fuel.toFixed(1)} gal`;
+      this.el.gTemp.style.width = `${Math.min(100, Math.max(0, (rv.temp - 100) / 160) * 100)}%`;
+      this.el.gTemp.classList.toggle('low', rv.temp > 220);
+      this.el.gTempN.textContent = `${Math.round(rv.temp)}°F`;
+      this.html(this.el.lamps, `<i class="${rv.handbrake ? 'on red' : ''}" title="Handbrake">P</i><i class="${rv.headlights ? 'on' : ''}" title="Headlights">💡</i><i class="${rv.wipers ? 'on' : ''}" title="Wipers">〰</i>`);
     }
+    // everyone else gets a one-line read of the RV
+    const showRv = opts.seat !== 'driver' && s.phase === 'drive';
+    this.el.rvstat.classList.toggle('hidden', !showRv);
+    if (showRv) this.html(this.el.rvstat, `<span><b>${mphNow}</b> mph</span><span class="${rv.fuel < 3 ? 'bad' : ''}">⛽ <b>${rv.fuel.toFixed(1)}</b> gal</span><span class="${rv.temp > 220 ? 'bad' : ''}">🌡️ <b>${Math.round(rv.temp)}</b>°</span><span class="${rv.integrity < 40 ? 'bad' : ''}">🔧 <b>${Math.round(rv.integrity)}</b>%</span>`);
+
+    // the rest of the crew
+    this.html(this.el.crew, opts.crew.map((c) => {
+      const st = s.crew[c.id];
+      const role = s.seats.driver === c.id ? '🚗' : s.seats.nav === c.id ? '🗺️' : '';
+      const hpC = Math.round(st?.hp ?? 100), huC = Math.round(st?.hunger ?? 100);
+      return `<div class="${hpC < 25 ? 'hurt' : ''}"><i style="background:${c.color}"></i><span>${esc(c.name)} ${role}</span><em><b class="hp" style="width:${hpC}%"></b></em><em><b class="hu${huC < 25 ? ' low' : ''}" style="width:${huC}%"></b></em></div>`;
+    }).join(''));
 
     // speed camera countdown (cameras are the only place the limit is enforced)
     const mph = Math.abs(s.rv.speed) * CFG.MPH;
@@ -266,17 +319,20 @@ export class HUD {
     const me = s.crew[opts.myId];
     const hunger = me?.hunger ?? 100, hypno = me?.hypno ?? 0;
     const hp = me?.hp ?? 100;
-    this.el.hp.style.width = `${hp}%`;
+    this.el.hp.style.width = `${Math.round(hp)}%`;
     this.el.hp.classList.toggle('low', hp < 25);
-    this.el.hunger.style.width = `${hunger}%`;
+    this.el.nHp.textContent = String(Math.round(hp));
+    this.el.nHunger.textContent = String(Math.round(hunger));
+    this.el.nAwake.textContent = `${Math.round((1 - hypno) * 100)}`;
+    this.el.hunger.style.width = `${Math.round(hunger)}%`;
     this.el.hunger.classList.toggle('low', hunger < 25);
-    this.el.stam.style.width = `${opts.stamina}%`;
+    this.el.stam.style.width = `${Math.round(opts.stamina)}%`;
     const buzz = opts.boost.t > 0;
     this.el.stam.classList.toggle('buzz', buzz);
     this.el.buzz.textContent = buzz ? `${opts.boost.drain <= 0.5 ? '☕' : '⚡'} ${Math.floor(opts.boost.t / 60)}:${String(Math.floor(opts.boost.t % 60)).padStart(2, '0')}` : '';
     const driving = opts.seat === 'driver';
     this.el.awakeRow.classList.toggle('hidden', !driving && hypno < 0.05);
-    this.el.awake.style.width = `${(1 - hypno) * 100}%`;
+    this.el.awake.style.width = `${Math.round((1 - hypno) * 100)}%`;
     this.hotbar(s, me?.slot ?? 0, opts.myId, opts.dt);
     this.el.smoke.style.opacity = String(opts.inRV ? s.cab.smoke * 0.75 : 0);
     const t = performance.now() / 1000;
@@ -295,22 +351,29 @@ export class HUD {
       o.classList.toggle('hidden', !opts.objective);
     }
     this.el.reticle.classList.toggle('active', !!opts.prompt);
-    this.el.prompt.textContent = opts.prompt;
+    const act = !opts.prompt ? '' : /^[A-Z]: /.test(opts.prompt) || opts.prompt.includes(' is driving') || opts.prompt.includes(' is navigating') ? '' : opts.seat === 'driver' ? 'Click' : 'E';
+    this.html(this.el.prompt, (act ? `<kbd>${act}</kbd>` : '') + esc(opts.prompt));
     this.el.prompt.classList.toggle('hidden', !opts.prompt);
 
-    this.el.hints.textContent = opts.seat === 'driver'
-      ? 'W/S throttle·brake   A/D steer   E/Q shift up·down   N nitrous   Space handbrake   H horn   Click dash   F stand'
+    // key hints: bright when the context changes, then they settle back
+    const hints: [string, string][] = opts.seat === 'driver'
+      ? [['W S', 'gas · brake'], ['A D', 'steer'], ['E Q', 'shift'], ['Space', 'handbrake'], ['N', 'nitrous'], ['H', 'horn'], ['Click', 'dash'], ['F', 'stand']]
       : opts.seat === 'nav'
-        ? 'Mouse look   Click dash   F stand'
+        ? [['Click', 'dash'], ['T', 'ping'], ['Enter', 'chat'], ['F', 'stand']]
         : opts.held
-          ? 'E / Click use · combine   Click eat (food) · spray (hold)   G drop   RMB throw   Tab players'
-          : 'WASD move   Shift sprint   Space jump   E / Click grab · interact   Enter chat   Tab players';
+          ? [['E', 'use · combine'], ['Click', 'eat · spray'], ['G', 'drop'], ['RMB', 'throw'], ['1 2 3', 'pockets']]
+          : [['WASD', 'move'], ['Shift', 'sprint'], ['Space', 'jump'], ['E', 'grab · use'], ['T', 'ping'], ['Enter', 'chat'], ['Tab', 'crew']];
+    const hk = opts.seat + (opts.held ? 'h' : '');
+    if (hk !== this.hintKey) { this.hintKey = hk; this.hintT = 14; }
+    this.hintT = Math.max(0, this.hintT - opts.dt);
+    this.el.hints.classList.toggle('dim', this.hintT <= 0);
+    this.html(this.el.hints, hints.map(([k, l]) => `<span><kbd>${k}</kbd>${l}</span>`).join(''));
+    this.el.hotbar.classList.toggle('tucked', opts.seat === 'driver' && !s.items.some((i) => i.h === opts.myId));
 
     this.el.pause.classList.toggle('hidden', opts.locked || s.phase === 'ended');
     if (!opts.locked) this.el.room.textContent = opts.room === 'SOLO' ? 'Solo run' : `Room code: ${opts.room}`;
     this.el.tab.classList.toggle('hidden', !opts.tab);
     if (opts.tab) {
-      const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
       this.el.tab.innerHTML = `<div class="tab-code">Room <b>${opts.room}</b></div>` + opts.players.map((p) => `<div>${esc(p)}</div>`).join('')
         + (this.texts.length ? `<div class="tab-texts">💍 Kevin: ${this.texts.slice(-2).map(esc).join('<br>')}</div>` : '');
     }

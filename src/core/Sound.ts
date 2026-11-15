@@ -290,6 +290,11 @@ export class Sound {
   private oneShot(name: string) {
     switch (name) {
       case 'click': this.noiseBurst(0.03, 3000, 0.25); break;
+      case 'step': this.noiseBurst(0.05, 380, 0.2, 0, 'lowpass'); this.tone(95, 70, 0.05, 'sine', 0.12); break;
+      case 'stepdirt': this.noiseBurst(0.07, 1500, 0.12); this.noiseBurst(0.04, 300, 0.12, 0, 'lowpass'); break;
+      case 'land': this.tone(80, 45, 0.14, 'sine', 0.3); this.noiseBurst(0.09, 350, 0.25, 0, 'lowpass'); break;
+      case 'ui': this.tone(660, 990, 0.06, 'triangle', 0.12); break;
+      case 'tick': this.noiseBurst(0.012, 2400, 0.1); break;
       case 'ratchet': for (let i = 0; i < 4; i++) this.noiseBurst(0.02, 2500, 0.2, i * 0.05); break;
       case 'shift': this.noiseBurst(0.06, 900, 0.3); break;
       case 'grind': this.noiseBurst(0.45, 4000, 0.35, 0, 'highpass'); break;

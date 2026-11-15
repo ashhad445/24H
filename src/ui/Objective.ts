@@ -24,6 +24,20 @@ export function nextWaypoint(s: SharedState): { label: string; miles: number } {
   return { label: ahead[1], miles: Math.max(0, ahead[0] - here) };
 }
 
+/** Every place on this run's route, as a 0..1 position along it (for the HUD route bar). */
+export function routeMarks(s: SharedState): { at: number; kind: 'stop' | 'fork' | 'end'; label: string }[] {
+  const total = totalMiles();
+  const out: { at: number; kind: 'stop' | 'fork' | 'end'; label: string }[] = [{ at: runLayout().rusty / total, kind: 'stop', label: "Rusty's Oasis" }];
+  for (const f of FORKS) if (s.route[f.id] === -1) out.push({ at: f.mile / total, kind: 'fork', label: 'Fork' });
+  for (const d of STOPS) {
+    if (d.id === 'rustyx') continue;
+    if (d.branch && s.route[d.branch.fork] !== d.branch.index) continue;
+    out.push({ at: d.mile / total, kind: 'stop', label: d.name });
+  }
+  out.push({ at: 1, kind: 'end', label: 'The wedding' });
+  return out.filter((m) => m.at > 0 && m.at <= 1);
+}
+
 export function objective(s: SharedState, myId: number, seat: SeatRole, nameOf: (id: number) => string): string {
   if (s.phase === 'ended') return '';
   const rv = s.rv, cab = s.cab, mine = seat === 'driver', d = s.seats.driver;

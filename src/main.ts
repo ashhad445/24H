@@ -1,6 +1,6 @@
 // Boot, lobby, and the main loop. The host runs HostSim; everyone renders the shared state.
 import * as THREE from 'three';
-import { CFG, DEV, PLAYER, gearInfo } from './config';
+import { CFG, DEV, PLAYER, PLAYER_COLORS, gearInfo } from './config';
 import { Input } from './core/Input';
 import { Assets } from './core/AssetLoader';
 import { Sound } from './core/Sound';
@@ -98,6 +98,9 @@ const sound = new Sound();
 const settings = setupSettings(sound, input, (q) => { gfx.setQuality(q); world.quality = q; fx.setScale(renderer.domElement.clientHeight * renderer.getPixelRatio(), camera.fov); });
 canvas.addEventListener('mousedown', () => { const first = !sound.ctx; sound.init(); if (first) settings.reapply(); });
 const hud = new HUD();
+// interface sounds: every button and menu control clicks
+document.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest?.('button, select, summary, input[type=range]')) sound.play('ui'); });
+document.addEventListener('mouseover', (e) => { if ((e.target as HTMLElement).closest?.('button')) sound.play('tick'); });
 sound.onCaption = (who, text) => hud.caption(who, text);
 const player = new Player(camera, rv, scene);
 player.statics.push(RUSTY_SET);
@@ -134,7 +137,10 @@ const isDescendant = (o: THREE.Object3D | null, of: THREE.Object3D) => { for (; 
 
 async function start() {
   const net: Net = await runLobby();
+  const TIPS = ['The driver shifts with E and Q. Everyone else: keep them fed.', 'The card has to be in your hand to pay for anything.', 'Speed cameras are the only place the limit counts.', 'A cheeseburger settles most arguments with Sheriff Roscoe.', 'Coffee keeps the driver awake. So does a slap.', 'Out of gas? There are two jerrycans in the back.', 'Press T to ping something for the crew.'];
+  hud.loading(true, TIPS[Math.floor(Math.random() * TIPS.length)]);
   await Assets.wait(5000);
+  await new Promise((r) => setTimeout(r, 60)); // let the veil paint before the shader warm-up blocks the thread
   lobbyLoop = false;
   // compile everything up front (hidden stops, every car type, every item) so nothing stalls mid-drive
   const samples = new THREE.Group();
@@ -196,6 +202,7 @@ async function start() {
     player.respawn();
     lastGear = 0; lastHP = 100; returnT = -1; lastDrive = ''; lastPose = '';
     hud.toast('🚐 New run, same crew. Try to keep the RV in one piece this time.');
+    hud.intro();
     input.lock();
   };
   /** Feed every state-driven view an empty world once, so nothing from the last run lingers under a reused id. */
@@ -309,7 +316,7 @@ async function start() {
   let devEnc = 0;
   let last = performance.now();
   let snapAcc = 0, poseAcc = 0, sprayAcc = 0, holdAcc = 0, frame = 0, fps = 0, fpsAcc = 0, fpsN = 0;
-  let driveAcc = 0, lastDrive = '', lastPose = '', returnT = 0, chatOpen = false;
+  let driveAcc = 0, lastDrive = '', lastPose = '', returnT = 0, chatOpen = false, lastStepN = 0, wasOnGround = true;
   /** Interactions that repeat while the button is held (pumping gas, siphoning). */
   const HOLD_IDS = new Set(['fuelport']);
   /** Clicking a parked car at Rusty's starts a minigame: jerrycan = siphon, empty hands = strip. */
@@ -406,6 +413,12 @@ async function start() {
       driveAcc += rawDt;
       if (isHost || key !== lastDrive || driveAcc >= 1 / CFG.DRIVE_HZ) { lastDrive = key; driveAcc = 0; net.toHost({ t: 'drive', i: drive }); }
     } else lastDrive = '';
+
+    // footsteps + landing
+    const stepN = Math.floor(player.stepPhase / Math.PI);
+    if (stepN !== lastStepN) { lastStepN = stepN; sound.play(player.inRV ? 'step' : 'stepdirt'); }
+    if (player.onGround && !wasOnGround && !player.seat) sound.play('land');
+    wasOnGround = player.onGround;
 
     // crew chat
     if (input.pressed('Enter') && !chatOpen && input.locked) {
@@ -553,7 +566,7 @@ async function start() {
     if (DEV && host && input.pressed('F5')) { const k = ENC_KINDS[devEnc++ % ENC_KINDS.length]; host.s.enc.list = []; host.enc.spawn(k); hud.toast(`DEV: encounter ${k}`); }
     if (DEV && host && input.pressed('F6')) { host.s.clock = (22 - CFG.START_HOUR) * 3600; hud.toast('DEV: 22:00'); }
     items.sync(shared.items, dt, shared.crew);
-    if (input.wheel) act(`slot:${input.wheel > 0 ? 1 : -1}`);
+    if (input.wheel) { act(`slot:${input.wheel > 0 ? 1 : -1}`); sound.play('tick'); }
     for (const [k, n] of [['Digit1', 0], ['Digit2', 1], ['Digit3', 2]] as const) if (input.pressed(k)) act(`slot:${(n - (shared.crew[net.myId]?.slot ?? 0) + 3) % 3}`);
 
     const camPos = camera.getWorldPosition(new THREE.Vector3());
@@ -633,7 +646,9 @@ async function start() {
 
     const players = [...net.names.entries()].map(([id, n]) =>
       `${n}${id === net.hostId ? ' (host)' : ''}${id === net.myId ? ' ← you' : ''}${shared.seats.driver === id ? ' 🚗' : shared.seats.nav === id ? ' 🗺️' : ''}`);
+    const crewList = [...net.names.entries()].filter(([id]) => id !== net.myId).map(([id, name]) => ({ id, name, color: looks.get(id)?.c ?? '#' + new THREE.Color(PLAYER_COLORS[(id - 1) % PLAYER_COLORS.length]).getHexString() }));
     hud.update(shared, {
+      crew: crewList,
       prompt: look.prompt, objective: objective(shared, net.myId, player.seat, nameOf),
       seat: player.seat, locked: input.locked, tab: input.down('Tab'), room: net.solo ? 'SOLO' : net.code, players,
       dt, cam: camAhead ? r.z - camAhead.z : null, myId: net.myId, stamina: player.stamina, boost: player.boost, held: held ? itemName(held.k, held.d) : '', inRV: player.inRV,
@@ -680,7 +695,8 @@ async function start() {
   };
 
   // rAF drives rendering; a watchdog keeps the sim alive when frames stop (background tab)
-  const frameLoop = () => { requestAnimationFrame(frameLoop); tick(true); };
+  let framesShown = 0;
+  const frameLoop = () => { requestAnimationFrame(frameLoop); tick(true); if (++framesShown === 3) { hud.loading(false); hud.intro(); } };
   requestAnimationFrame(frameLoop);
   // Browsers throttle a hidden tab's own timers to ~1 Hz, which starves the host sim (and everyone's game with it).
   // A worker's timer isn't throttled, so it drives the watchdog; plain setInterval is the fallback.
@@ -700,7 +716,12 @@ let lobbyLoop = true;
 const lobbyRender = () => {
   if (!lobbyLoop) return;
   requestAnimationFrame(lobbyRender);
-  world.update(rv.root.position, camera.position, 7.5);
+  // slow orbit around the parked RV in the late-afternoon light
+  const a = performance.now() / 1000 * 0.07 + 0.6, rp = rv.root.position;
+  camera.position.set(rp.x + Math.sin(a) * 10.5 + 4, 2.9 + Math.sin(a * 0.7) * 0.7, rp.z - 1 - Math.cos(a) * 10.5);
+  camera.lookAt(rp.x + 4, 1.7, rp.z - 0.5);
+  world.update(rp, camera.position, 17.4);
+  chapel.update(rp);
   gfx.render();
 };
 lobbyRender();

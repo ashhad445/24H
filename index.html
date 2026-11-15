@@ -11,8 +11,8 @@
 
     <div id="lobby">
       <div class="card">
-        <h1>🚐 Roadtrip Roulette</h1>
-        <p class="sub">24 hours. $200. One beater RV. Show up to the wedding with at least $100 left.</p>
+        <div class="logo"><span>🚐</span><div><h1>Roadtrip<br><b>Roulette</b></h1></div></div>
+        <p class="sub">24 hours. $200 on one card. One beater RV.<br>Get the crew to the wedding with $100 left for the gift.</p>
         <label>Your name <input id="l-name" maxlength="16" /></label>
         <div class="l-look">
           <span>Your bean</span>
@@ -40,7 +40,14 @@
         <p id="l-status"></p>
         <p id="l-last"></p>
       </div>
+      <div class="l-how">
+        <div><b>🚗 Drive</b>Stick shift, handbrake, a key that sticks.</div>
+        <div><b>🍳 Cook</b>Keep the driver fed and awake.</div>
+        <div><b>🔧 Fix</b>Fuses, flats, fires, duct tape.</div>
+        <div><b>🎰 Hustle</b>Wash cars. Hit the slots. Don't get caught.</div>
+      </div>
     </div>
+    <div id="loading" class="hidden"><div><span>🚐</span><b>Packing the RV…</b><i></i><p id="ld-tip"></p></div></div>
 
     <div id="fx-smoke"></div>
     <div id="fx-hurt"></div>
@@ -55,31 +62,50 @@
     <div id="map" class="hidden"><canvas id="map-canvas" width="900" height="620"></canvas><p>M / click to fold the map</p></div>
     <div id="hud" class="hidden">
       <div id="stats">
-        <div id="h-wedding"></div>
-        <div id="h-time"></div>
-        <div id="h-miles"></div>
-        <div id="h-money"><span id="h-money-v"></span><div id="h-money-fly"></div></div>
+        <div class="trip">
+          <div class="trip-top">
+            <div id="h-wedding"><b id="h-count"></b><span id="h-count-l"></span></div>
+            <div id="h-time"></div>
+          </div>
+          <div id="route">
+            <div class="r-track"><b id="r-fill"></b><div id="r-ticks"></div><i id="r-me">🚐</i></div>
+            <div id="h-miles"></div>
+          </div>
+          <div id="h-money">
+            <div class="m-row"><span class="m-ico">💳</span><span id="h-money-v"></span><div id="h-money-fly"></div></div>
+            <div class="m-bar"><b id="m-fill"></b><i></i></div>
+            <em id="h-gift"></em>
+          </div>
+        </div>
         <div id="h-badges"></div>
       </div>
+      <div id="intro" class="hidden"><small>06:00 · somewhere outside L.A.</small><b>24 hours to the wedding</b><span>$200 on the card. Keep $100 of it for the gift.</span></div>
       <div id="top-center"><div id="cam-warn" class="hidden"></div><div id="objective" class="hidden"></div></div>
       <div id="chat"><div id="chat-log"></div><input id="chat-in" class="hidden" maxlength="120" placeholder="Say something to the crew… (Enter to send)" autocomplete="off" /></div>
       <div id="pings"></div>
       <div id="reticle"></div>
       <div id="prompt" class="hidden"></div>
       <div id="hotbar"><div id="hb-name"></div><div class="hb-row"><div class="hb-slot"><i>1</i><span class="hb-icon"></span><b class="hb-count"></b><em class="hb-price"></em></div><div class="hb-slot"><i>2</i><span class="hb-icon"></span><b class="hb-count"></b><em class="hb-price"></em></div><div class="hb-slot"><i>3</i><span class="hb-icon"></span><b class="hb-count"></b><em class="hb-price"></em></div></div></div>
-      <div id="vitals">
-        <div class="bar"><span>❤️</span><i><b id="v-hp"></b></i></div>
-        <div class="bar"><span>🍔</span><i><b id="v-hunger"></b></i></div>
-        <div class="bar"><span>⚡</span><i><b id="v-stam"></b></i><em id="v-buzz"></em></div>
-        <div class="bar" id="v-awake-row"><span>😴</span><i><b id="v-awake"></b></i></div>
+      <div id="left-stack">
+        <div id="crew"></div>
+        <div id="vitals">
+          <div class="bar" title="Health"><span>❤️</span><i><b id="v-hp"></b></i><u id="n-hp"></u></div>
+          <div class="bar" title="Hunger"><span>🍔</span><i><b id="v-hunger"></b></i><u id="n-hunger"></u></div>
+          <div class="bar" title="Stamina"><span>⚡</span><i><b id="v-stam"></b></i><em id="v-buzz"></em></div>
+          <div class="bar" id="v-awake-row" title="How awake the driver is"><span>😴</span><i><b id="v-awake"></b></i><u id="n-awake"></u></div>
+        </div>
       </div>
       <div id="gearbox" class="hidden">
-        <div class="g-keys"><span>Q ▼</span><span>E ▲</span></div>
-        <div id="g-gear">N</div>
-        <div id="g-speed">0 mph</div>
-        <div id="g-nos">NOS</div>
-        <div class="g-rpm"><b id="g-rpm"></b></div>
+        <div class="g-main">
+          <div class="g-speedo"><b id="g-speed">0</b><span>mph</span></div>
+          <div class="g-gearbox"><small>Q ▼</small><div id="g-gear">N</div><small>E ▲</small></div>
+        </div>
+        <div class="g-rpm"><b id="g-rpm"></b><i></i></div>
+        <div class="g-row"><span>⛽</span><i><b id="g-fuel"></b></i><u id="g-fuel-n"></u></div>
+        <div class="g-row"><span>🌡️</span><i><b id="g-temp"></b></i><u id="g-temp-n"></u></div>
+        <div class="g-foot"><div id="g-nos">NOS</div><div id="g-lamps"></div></div>
       </div>
+      <div id="rvstat" class="hidden"></div>
       <div id="hints"></div>
       <div id="toasts"></div>
       <div id="phone"></div>

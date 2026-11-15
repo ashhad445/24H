@@ -189,7 +189,7 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 | | Esc | Release mouse / pause menu (settings, controls list, copy invite link) |
 
 ## 16. HUD (diegetic first)
-Center reticle + context prompt · top‑center objective line (first-drive walkthrough → how to fix what just broke → next stop and distance; `ui/Objective.ts`) · top‑left clock (countdown to 24:00), odometer, card balance (crimson if < $100 gift line, flashing if < $0), hazard badges · bottom‑left vitals + held item · bottom‑center key hints · top‑right toasts · Tab: room code & players.
+**HUD v2** (`ui/HUD.ts`, styles under "HUD v2" in `style.css`): top‑left trip card (countdown, clock, route bar with stop / fork / chapel ticks from `routeMarks()`, card balance with a gift-line bar and "$N to spare / short") with colour-coded status chips under it · bottom‑left crew panel (other players' health and hunger) above your vitals with numbers · bottom‑right driver cluster (speed, gear, rev bar with redline, fuel, temperature, NOS, handbrake / lights / wiper lamps) or, for everyone else, a one-line RV read-out · bottom‑center pockets (tucked away for an empty-handed driver) and key-cap hints that dim after 14 s · prompts carry a key cap. Per-frame HTML goes through `HUD.html()` so the DOM only changes when the text does. Older notes: center reticle + context prompt · top‑center objective line (first-drive walkthrough → how to fix what just broke → next stop and distance; `ui/Objective.ts`) · top‑left clock (countdown to 24:00), odometer, card balance (crimson if < $100 gift line, flashing if < $0), hazard badges · bottom‑left vitals + held item · bottom‑center key hints · top‑right toasts · Tab: room code & players.
 
 ## 17. Audio
 Procedural Web Audio (engine, road, ambience, SFX) + procedural radio stations (Phase 6). Real audio files later. 3D proximity voice (WebRTC, Phase 7), muffled through RV walls.
@@ -480,10 +480,19 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Today's road**: lobby option; the seed comes from the UTC date (`dailySeed()`), so everyone who picks it drives the same layout that day. `?seed=N` still wins.
   - **`rvkit.glb`** (`art/rvkit.py`, applied by `rv/RVKit.ts` once models load): wheels with tread, steel rims and hubcaps; chrome bumpers (overriders, plate, hitch, step); egg-crate grille; headlight bezels with turn signals; roof AC; rear ladder; plus new roof rack with cargo, rolled awning, TV antenna, roof vent, mud flaps. The procedural pieces it replaces are listed in `RVModel.kitHide` / `kitWheels` and hidden only if the kit loaded. Colliders, click targets and the lit lenses stay procedural.
   - **`items.glb`** (`art/items.py`): extinguisher, hammer, jerrycan, coolant, pistol, fuel nozzle, duct tape, coffee. `buildItemMesh` returns the model when it is loaded (`GLB_ITEMS`), else the procedural mesh.
+- [x] **Presentation pass** (checked with screenshots of every screen and the two-player browser test):
+  - **HUD v2**: see §16.
+  - **Title screen**: the 3D world shows through (slow orbit around the parked RV in late-afternoon light), logo, role cards. The chapel arch no longer sits on the start line behind the lobby.
+  - **Loading veil** with a random tip between the title screen and the first frames, then an opening title card (`HUD.loading`, `HUD.intro`).
+  - **Sound**: footsteps (cabin floor vs dirt, from `Player.stepPhase`), landing thud, pocket-switch tick, interface click / hover sounds on every button.
+  - Pause menu dims the world behind it.
+  - Test note: two software-rendered browsers peak at 2–4 GB each during shader warm-up in this container, which can get a tab killed. That is the test rig, not a leak: play holds steady (geometries / textures / JS heap flat across 100 s of two-player play and four restarts).
 ### Phase 7 — Voice chat, player list polish
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑11‑15 — Presentation pass**: HUD v2, title screen, loading veil + intro card, footsteps and interface sounds. Needs a human playtest for feel and readability at speed.
+
 **2026‑11‑15 — Same-crew restart, bean looks, emotes, pings, daily road, Blender RV kit + hand props.** Checked with a two-player headless browser run; needs a human playtest. Not built: host migration, late-join catch-up of an emote in progress, off-screen ping arrows.
 
 **2026‑11‑15 — Ten quality-of-life upgrades** (receipt, play again, objective line, chat, catch-up, stranded ending, background host, fewer messages, seat names, invite link). Needs a human playtest like the rest.
