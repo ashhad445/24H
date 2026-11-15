@@ -183,6 +183,8 @@ Debit card · paper map · raw patty / bun / cheese / burger · soda / energy dr
 | | F | Stand up |
 | On foot, left behind | Hold R | Catch up with the RV (more than 80 m away; not while chased or carrying unpaid goods) |
 | Any | Enter | Crew text chat |
+| | T / middle-click | Ping what you're looking at (label with your name and the distance, 6 s) |
+| | B · V · C | Wave · dance · cheer |
 | | Tab | Player list / room code |
 | | Esc | Release mouse / pause menu (settings, controls list, copy invite link) |
 
@@ -445,6 +447,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
     - High: full bloom, 4096 shadows, pixel ratio ≤ 2.
   - **Look**: sky reflections (a PMREM env map baked from the sky dome every 4 s, on at every quality so shaders never change), bloom, a warm color grade, vignette and grain. The composer renders the scene into a half-float target, which uses the same shader variant as the mirrors, so `warm()` still covers it.
   - **Sky / terrain / road** (`world/Sky.ts`, `Terrain.ts`, `TexGen.ts`, `Noise.ts`, `DustTrail.ts`): scattering sky with drifting clouds, sun glare, twilight palette; fog colour = sky horizon. Streamed terrain strips per chunk: flat (y = −0.02) within 40 m of any road and around stop clear-zones, dunes and hills beyond, 3 parallax rings of far mountains. Procedural asphalt (tracks, cracks, patches, oil), worn paint, gravel shoulders. Stars have per-star size / brightness / tint + twinkle. Low sun: warm sky fill and flatter ground/asphalt normal maps (no dark speckle at sunset). `world.quality` is set by `main.ts` with the Esc-menu setting (dust trail + mountain shimmer only on Medium / High).
+  - Blender 5.3 (`bpy` 5.3.0 on Python 3.13) also builds these scripts unchanged.
   - **Vehicles & animals** (`art/vehicles.py` → `vehicles.glb`, `art/animals.py` → `animals.glb`): sedan, cop, pickup, bandit pickup, camper, semi, shark car, wheels, drivers; locomotive + box/tank/hopper cars, crossing signal; cows (superellipse barrel body, 3 irregular patch layouts with refined patch borders), ostrich, cone. Procedural fallbacks stay until the glbs load.
 - [x] **Dynamic road + a new layout every run** (`world/RoadShape.ts`, `world/RunSeed.ts`; tests: `npx tsx scripts/sim-road-shape.ts`, `npx tsx scripts/sim-road-drive.ts`):
   - **Run seed**: the host picks `s.seed` at start (`?seed=N` forces one; `0` = the old straight, flat highway, also used by the lobby preview and the headless sims). Clients apply it from their first snapshot, so everyone builds the same road locally.
@@ -460,7 +463,7 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - Paper map shows this run's stop miles and marks mountains, cliff roads, narrow passes and twisty bits.
 - [x] **Ten quality-of-life upgrades** (tests: `npx tsx scripts/sim-receipt.ts`; two-tab browser run with `?dev`):
   - **Receipt & Blame Board**: when a run ends the host builds a `Receipt` from the ledger (`HostSim.receipt()`) and sends it once (`ev: receipt`). The end screen shows a paper receipt (lines grouped per player), trip facts, spent / earned / gambling per player, and awards (The Degenerate, Lucky Bean, Big Spender, Breadwinner, The Liability).
-  - **Play again**: end-screen button. Solo and host reload straight into a new run (`sessionStorage rr-again`); the host gets a new room code, so clients rejoin by code. The lobby shows the last run and the delivery count (`localStorage rr-runs`). An in-place restart without a reload is not built.
+  - **Play again**: superseded by the in-place restart below. The lobby shows the last run, the delivery count and the best delivery (`localStorage rr-runs`).
   - **Objective line** (`ui/Objective.ts`): see §16.
   - **Crew chat**: Enter opens a text box; `GameMsg 'chat'` goes to everyone and shows with the sender's name.
   - **Catch up with the RV**: hold R for 1.5 s when left more than 80 m behind on foot.
@@ -469,10 +472,20 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Fewer network messages**: see §18b.
   - **Seats**: looking at a taken seat says who is in it; "Seat taken" names them.
   - **Pause menu**: Copy invite link (`?room=CODE`) and a controls list.
-### Phase 7 — Voice chat, cosmetics, player list polish
+- [x] **Same-crew restart, bean looks, emotes, pings, daily road, Blender RV kit + hand props** (browser test with two players; no new headless sim):
+  - **Play again in the same room**: the host (or a solo player) builds a new `HostSim` with a new seed and sends `ev: restart`. Everyone drops the old run (`resetRun` in `main.ts`): receipt, snapshots, pings, minigame, and every state-driven view is fed one empty state (`flushViews`) so nothing lingers under a reused id; players respawn on the RV floor. Same room code, nobody rejoins.
+  - **Bean looks**: the lobby has 8 colours and 10 hats (`LOOK_COLORS` / `LOOK_HATS` in `player/Avatar.ts`, saved in `localStorage rr-look`). `GameMsg 'look'` is broadcast on start and whenever someone joins; `Avatar.setLook` rebuilds the bean and moves held items to the new hand.
+  - **Emotes**: B wave, V dance, C cheer (`GameMsg 'emo'`, `Character.dance()` / `cheer()`).
+  - **Pings** (`ui/Pings.ts`): T or middle-click marks what the reticle is on. `GameMsg 'ping'` carries an RV-local point if it hit the RV (so it rides along), else a world point. DOM labels projected each frame; hidden when off-screen.
+  - **Today's road**: lobby option; the seed comes from the UTC date (`dailySeed()`), so everyone who picks it drives the same layout that day. `?seed=N` still wins.
+  - **`rvkit.glb`** (`art/rvkit.py`, applied by `rv/RVKit.ts` once models load): wheels with tread, steel rims and hubcaps; chrome bumpers (overriders, plate, hitch, step); egg-crate grille; headlight bezels with turn signals; roof AC; rear ladder; plus new roof rack with cargo, rolled awning, TV antenna, roof vent, mud flaps. The procedural pieces it replaces are listed in `RVModel.kitHide` / `kitWheels` and hidden only if the kit loaded. Colliders, click targets and the lit lenses stay procedural.
+  - **`items.glb`** (`art/items.py`): extinguisher, hammer, jerrycan, coolant, pistol, fuel nozzle, duct tape, coffee. `buildItemMesh` returns the model when it is loaded (`GLB_ITEMS`), else the procedural mesh.
+### Phase 7 — Voice chat, player list polish
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑11‑15 — Same-crew restart, bean looks, emotes, pings, daily road, Blender RV kit + hand props.** Checked with a two-player headless browser run; needs a human playtest. Not built: host migration, late-join catch-up of an emote in progress, off-screen ping arrows.
+
 **2026‑11‑15 — Ten quality-of-life upgrades** (receipt, play again, objective line, chat, catch-up, stranded ending, background host, fewer messages, seat names, invite link). Needs a human playtest like the rest.
 
 **2026‑10‑29 — Phase 6 built**: radio, groom texts, road/ambient audio, juice.

@@ -186,6 +186,8 @@ export class Character {
   private eatT = 0;
   private slapT = 0;
   private waveT = 0;
+  private danceT = 0;
+  private cheerT = 0;
   private headBaseY: number;
   private readonly bean: boolean;
   private readonly mood: Mood;
@@ -480,6 +482,8 @@ export class Character {
   eat() { this.eatT = 1.3; }
   slap() { this.slapT = 0.45; }
   wave() { this.waveT = 1.6; }
+  dance() { this.danceT = 3.2; }
+  cheer() { this.cheerT = 1.4; }
 
   dispose() { Character.all.delete(this); this.root.removeFromParent(); }
 
@@ -618,6 +622,15 @@ export class Character {
     }
     if (this.slapT > 0) { this.slapT -= dt; rx = 1.4; rz = -1.2 + (0.45 - this.slapT) * 6; re = 0.3; }
     if (this.waveT > 0) { this.waveT -= dt; rx = Math.PI * 0.8; rz = 0.35; re = 0.5 + Math.sin(t * 9) * 0.55; }
+    if (this.danceT > 0) { this.danceT -= dt; const b = Math.sin(t * 9); rx = 2.3 + b * 0.6; lx = 2.3 - b * 0.6; rz = 0.35; lz = -0.35; re = le = 0.6; }
+    if (this.cheerT > 0) { this.cheerT -= dt; rx = lx = Math.PI * 0.95; rz = 0.3; lz = -0.3; re = le = 0.15; }
+    const emoting = this.danceT > 0 || this.cheerT > 0;
+    if (emoting && !a.seated) {
+      this.body.rotation.z = this.danceT > 0 ? Math.sin(t * 9) * 0.16 : 0;
+      this.body.position.y = Math.abs(Math.sin(t * (this.danceT > 0 ? 9 : 12))) * (this.danceT > 0 ? 0.07 : 0.16);
+      if (this.danceT > 0) this.body.rotation.y = Math.sin(t * 4.5) * 0.5;
+    } else if (bean) this.body.rotation.y = lerp(this.body.rotation.y, 0, k(10));
+    const el = lx, er = rx, elz = lz, erz = rz;
     if (bean) { // single-piece arms
       lx = -sw * 0.5 * stride; lz = -0.12; rx = sw * 0.5 * stride; rz = 0.12;
       if (a.hold) { rx = 1.25 + a.aim * 0.8; rz = 0; }
@@ -625,6 +638,7 @@ export class Character {
       if (this.eatT > 0) { rx = 2.5; rz = -0.55; }
       if (this.slapT > 0) { rx = 1.4; rz = -1.2 + (0.45 - this.slapT) * 6; }
       if (this.waveT > 0) { rx = Math.PI * 0.95; rz = 0.3 + Math.sin(t * 9) * 0.35; }
+      if (emoting) { lx = el; rx = er; lz = elz; rz = erz; }
     }
     this.armL.rotation.x = lerp(this.armL.rotation.x, lx, k(12));
     this.armL.rotation.z = lerp(this.armL.rotation.z, lz, k(12));

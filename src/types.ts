@@ -175,6 +175,10 @@ export type GameMsg =
   | { t: 'ev'; k: 'puke'; to: number }
   | { t: 'ev'; k: 'wake'; to: number } // passed out: wake up on the RV floor
   | { t: 'ev'; k: 'receipt'; r: Receipt }
+  | { t: 'ev'; k: 'restart' } // the host started a new run in the same room
+  | { t: 'look'; c: string; h: string } // a player's bean colour + hat
+  | { t: 'emo'; what: 'wave' | 'dance' | 'cheer' }
+  | { t: 'ping'; rv: boolean; p: [number, number, number] } // "look here" marker (RV-local if rv)
   | { t: 'chat'; text: string }; // crew text chat (sent to everyone, shown with the sender's name)
 
 /** End-of-run receipt + blame board, built by the host from the card ledger. */

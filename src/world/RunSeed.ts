@@ -42,4 +42,13 @@ export function newRunSeed(): number {
   if (q !== null && q !== '' && Number.isFinite(Number(q))) return Number(q) >>> 0;
   return 1 + Math.floor(Math.random() * 2 ** 30);
 }
+/** Today's seed (UTC date): everyone who picks "Today's road" gets the same layout. `?seed=N` still wins. */
+export function dailySeed(): number {
+  const q = new URLSearchParams(globalThis.location?.search ?? '').get('seed');
+  if (q !== null && q !== '' && Number.isFinite(Number(q))) return Number(q) >>> 0;
+  const d = new Date();
+  let h = (d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate()) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b); h = Math.imul(h ^ (h >>> 16), 0x45d9f3b); h ^= h >>> 16;
+  return 1 + ((h >>> 0) % (2 ** 30));
+}
 export const MILE_M = 1 / CFG.MILES_PER_METER;

@@ -1,4 +1,5 @@
 // Item catalogue: names, collision radius, food values and procedural meshes.
+import { Assets } from '../core/AssetLoader';
 import * as THREE from 'three';
 
 export interface ItemKind {
@@ -154,8 +155,12 @@ function bag(color: string, ink: string, text: string, w: number, h: number, d: 
   const g = new THREE.Group(); g.add(m); return g;
 }
 
+const GLB_ITEMS = new Set(['extinguisher', 'hammer', 'jerrycan', 'coolant', 'pistol', 'nozzle', 'tape', 'coffee']);
+
 /** Build the mesh for an item. Origin is at the item's center. */
 export function buildItemMesh(k: string): THREE.Object3D {
+  // Blender-built props (art/items.py) once they have loaded; procedural otherwise
+  if (GLB_ITEMS.has(k)) { const n = Assets.node('items', k); if (n) return n; }
   const cyl = (r: number, h: number, seg = 14) => new THREE.CylinderGeometry(r, r, h, seg);
   switch (k) {
     case 'patty': {

@@ -171,6 +171,14 @@ export class Player {
     return null;
   }
 
+  /** A new run: back on the RV floor, on your feet, rested. */
+  respawn() {
+    this.seat = '';
+    if (!this.inRV) this.setInRV(true);
+    this.pos.set(0.2, RV.floorY, 1.6); this.vel.set(0, 0, 0); this.yaw = 0; this.pitch = 0;
+    this.stamina = 100;
+  }
+
   /** Passed out: the crew drags you onto the RV floor (seated players stay put). */
   wakeInRV() {
     if (this.seat) return;

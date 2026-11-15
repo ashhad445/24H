@@ -11,7 +11,7 @@ import type { Net } from './net/Net';
 import { Effects } from './fx/Effects';
 import { LightPool } from './fx/LightPool';
 import { initShaderWarm, warm } from './fx/ShaderWarm';
-import { Avatar } from './player/Avatar';
+import { Avatar, type Look } from './player/Avatar';
 import { Character } from './models/Character';
 import { Player } from './player/Player';
 import { RVModel } from './rv/RV';
@@ -28,12 +28,13 @@ import { FORKS, branchAt, chapelZ, forkZ, progressMiles, setRouteChoices, totalM
 import type { EncKind, GameMsg, ItemState, Pose, Receipt, SharedState } from './types';
 import { HUD } from './ui/HUD';
 import { objective } from './ui/Objective';
-import { runLobby } from './ui/Lobby';
+import { lobbyChoice, runLobby } from './ui/Lobby';
+import { Pings } from './ui/Pings';
 import { setupSettings } from './ui/Settings';
 import { Vultures } from './world/Vultures';
 import { CanyonView } from './world/CanyonView';
 import { LANE_OFFSET, World, clearHazardsBeyond, nextRadar, onRoad, roadPoint, roadX, roadYaw } from './world/World';
-import { applyRunSeed, newRunSeed } from './world/RunSeed';
+import { applyRunSeed, dailySeed, newRunSeed } from './world/RunSeed';
 import { RockPiles } from './world/RockPiles';
 import { Graphics } from './fx/Graphics';
 import { MafiaView } from './traffic/MafiaView';
@@ -168,23 +169,47 @@ async function start() {
     else if (m.k === 'puke' && m.to === net.myId) { hud.puke(); hud.hurt(0.3); }
     else if (m.k === 'wake' && m.to === net.myId) setTimeout(() => player.wakeInRV(), 2500); // moved while the screen is black
     else if (m.k === 'receipt') { receipt = m.r; hud.showReceipt(m.r); }
+    else if (m.k === 'restart') resetRun();
   };
   let receipt: Receipt | null = null;
   let endShown = false, runSaved = false;
+  const poses = new Map<number, Pose>();
+  const looks = new Map<number, Look>();
+  const pings = new Pings(rv, camera);
+  const blankState = () => { const b = new HostSim(() => {}).s; b.items = []; return b; };
 
-  if (isHost) {
-    // a new road and stop layout every run (before the host builds anything that depends on it)
-    if (applyRunSeed(newRunSeed())) clearHazardsBeyond(1e9);
+  /** Host: build a fresh simulation (a new road and stop layout, unless today's road was picked). */
+  const startRun = () => {
+    if (applyRunSeed(lobbyChoice.daily ? dailySeed() : newRunSeed())) clearHazardsBeyond(1e9);
     host = new HostSim((m) => { applyEvent(m); net.broadcast(m); }, (open) => rv.activeColliders(open));
     host.names = nameOf;
-    host.crew(net.myId);
+    host.handOf = handOf;
+    for (const id of net.names.keys()) host.crew(id);
     shared = host.s;
-  } else {
-    shared = new HostSim(() => {}).s;
-    shared.items = [];
-  }
-  const items = new ItemViews(rv, dyn, camera, avatars, net.myId);
-  const poses = new Map<number, Pose>();
+  };
+  /** Everyone: a new run started in this room. Drop everything left over from the last one. */
+  const resetRun = () => {
+    receipt = null; endShown = false; runSaved = false; snaps.length = 0;
+    if (!host) shared = blankState();
+    hud.hideReceipt(); heist.cancel(); mapView.toggle(false); pings.clear();
+    flushViews();
+    player.respawn();
+    lastGear = 0; lastHP = 100; returnT = -1; lastDrive = ''; lastPose = '';
+    hud.toast('🚐 New run, same crew. Try to keep the RV in one piece this time.');
+    input.lock();
+  };
+  /** Feed every state-driven view an empty world once, so nothing from the last run lingers under a reused id. */
+  const flushViews = () => {
+    const b = blankState(), cam = camera.getWorldPosition(new THREE.Vector3());
+    items.sync([], 0, {});
+    traffic.update(0, b, cam, world.daylight);
+    encView.update(b, 0, cam);
+    canyonView.update(0, b);
+    mafiaView.update(b);
+    stopsView.update(b, 0, rv.root.position, () => null);
+    rusty.update(0, b, rv.root.position, () => null, () => {});
+  };
+
   /** World position of a player's hands, from their latest pose. */
   const handOf = (id: number): [number, number, number] | null => {
     const p = id === net.myId ? player.pose() : poses.get(id);
@@ -193,12 +218,18 @@ async function start() {
     const r = shared.rv; const c = Math.cos(r.yaw), sn = Math.sin(r.yaw);
     return [r.x + p.x * c + p.z * sn, p.y + 1.2, r.z - p.x * sn + p.z * c];
   };
-  if (host) host.handOf = handOf;
+  if (isHost) startRun();
+  else shared = blankState();
+  const items = new ItemViews(rv, dyn, camera, avatars, net.myId);
+  const avatarOf = (id: number) => {
+    let a = avatars.get(id);
+    if (!a) { a = new Avatar(id, nameOf(id), rv, dyn, looks.get(id)); avatars.set(id, a); }
+    return a;
+  };
+  const sendLook = () => net.broadcast({ t: 'look', c: lobbyChoice.look.c, h: lobbyChoice.look.h });
 
   const applyPose = (from: number, p: Pose) => {
-    let a = avatars.get(from);
-    if (!a) { a = new Avatar(from, nameOf(from), rv, dyn); avatars.set(from, a); }
-    a.setPose(p);
+    avatarOf(from).setPose(p);
     poses.set(from, p);
     host?.crew(from);
   };
@@ -211,14 +242,23 @@ async function start() {
         if (m.p) applyPose(from, m.p); // the host's own pose rides along with the snapshot
       } else if (m.t === 'chat') {
         if (typeof m.text === 'string' && m.text) { hud.chat(nameOf(from), m.text.slice(0, 120)); sound.play('buzz'); }
+      } else if (m.t === 'look') {
+        if (typeof m.c !== 'string' || typeof m.h !== 'string') return;
+        looks.set(from, { c: m.c, h: m.h });
+        avatars.get(from)?.setLook(looks.get(from));
+      } else if (m.t === 'emo') {
+        const c = avatars.get(from)?.char;
+        if (m.what === 'wave') c?.wave(); else if (m.what === 'dance') c?.dance(); else if (m.what === 'cheer') c?.cheer();
+      } else if (m.t === 'ping') {
+        if (Array.isArray(m.p) && m.p.length === 3) { pings.add(nameOf(from), !!m.rv, m.p); sound.play('ding'); }
       } else if (m.t === 'ev') {
         if (!isHost) applyEvent(m);
       } else if (host) host.handle(from, m);
     },
-    onJoin(id, name) { hud.toast(`${name} hopped in the RV`); host?.crew(id); },
+    onJoin(id, name) { hud.toast(`${name} hopped in the RV`); host?.crew(id); sendLook(); },
     onLeave(id) {
       hud.toast(`${nameOf(id)} left`);
-      avatars.get(id)?.dispose(); avatars.delete(id);
+      avatars.get(id)?.dispose(); avatars.delete(id); looks.delete(id); poses.delete(id);
       host?.peerGone(id);
     },
     onHostLeft() { hud.toast('Host left — run over.'); shared.phase = 'ended'; shared.ending = 'The host left the RV.'; },
@@ -226,6 +266,7 @@ async function start() {
   if (!net.solo) {
     hud.toast(isHost ? `Room code: ${net.code} — share it with your crew (Tab, or Esc → Copy invite link)` : `Joined room ${net.code}`);
     hud.invite(`${location.origin}${location.pathname}?room=${net.code}`);
+    sendLook();
   }
 
   /** Client-side snapshot interpolation of the RV pose. */
@@ -246,7 +287,7 @@ async function start() {
 
   const act = (id: string, btn = 0) => net.toHost({ t: 'act', id, btn });
   if (DEV) (window as any).game = {
-    net, get host() { return host; }, player, rv, world, input, rusty, RUSTY_SET, avatars, camera, scene, renderer, sideRT, sideCams,
+    net, get host() { return host; }, pings, player, rv, world, input, rusty, RUSTY_SET, avatars, camera, scene, renderer, sideRT, sideCams,
     /** Dev: spawn a fake crewmate in front of the camera (RV-local pose). */
     dummy(id = 2, p: Partial<Pose> = {}) {
       let a = avatars.get(id); if (!a) { a = new Avatar(id, 'Dev Bean ' + id, rv, dyn); avatars.set(id, a); }
@@ -376,6 +417,28 @@ async function start() {
         net.broadcast({ t: 'chat', text });
       });
     }
+
+    // emotes + pings (not while typing)
+    if (!chatOpen && input.locked && shared.phase === 'drive') {
+      for (const [key, what] of [['KeyB', 'wave'], ['KeyV', 'dance'], ['KeyC', 'cheer']] as const) {
+        if (input.pressed(key)) { net.broadcast({ t: 'emo', what }); hud.toast(what === 'wave' ? '👋 You wave' : what === 'dance' ? '🕺 You bust a move' : '🙌 You cheer'); }
+      }
+      if (input.pressed('KeyT') || input.clicked(1)) {
+        camera.updateMatrixWorld(true);
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        raycaster.far = 400;
+        const hit = raycaster.intersectObjects(scene.children, true).find((h) => seen(h.object) && h.object.type !== 'Sprite' && h.object.type !== 'Points' && !isDescendant(h.object, camera) && h.distance > 0.3);
+        if (hit) {
+          const inRV = isDescendant(hit.object, rv.root);
+          const q = inRV ? rv.body.worldToLocal(hit.point.clone()) : hit.point;
+          const pt: [number, number, number] = [q.x, q.y, q.z];
+          pings.add(nameOf(net.myId), inRV, pt);
+          net.broadcast({ t: 'ping', rv: inRV, p: pt });
+          sound.play('ding');
+        }
+      }
+    }
+    pings.update(rawDt);
 
     // left behind: hold R to catch up with the RV
     const leftBehind = !player.inRV && !player.seat && shared.phase === 'drive' && Math.hypot(player.pos.x - shared.rv.x, player.pos.z - shared.rv.z) > 80;
@@ -554,12 +617,10 @@ async function start() {
       endShown = true;
       document.exitPointerLock?.();
       mapView.toggle(false);
-      const again = net.solo ? 'solo' : isHost ? 'host' : '';
       const home = () => { location.href = location.pathname + (DEV ? '?dev' : ''); };
-      hud.endButtons(
-        again ? () => { try { sessionStorage.setItem('rr-again', again); } catch { /* ignore */ } home(); } : null, home,
-        net.solo ? '' : isHost ? 'Play again opens a new room: send the crew the new code.' : 'When the host starts a new run, join with their new room code.',
-      );
+      const again = () => { if (!host || shared.phase !== 'ended') return; startRun(); const m: GameMsg = { t: 'ev', k: 'restart' }; applyEvent(m); net.broadcast(m); };
+      hud.endButtons(isHost ? again : null, home,
+        net.solo ? '' : isHost ? 'Play again starts a new run right here: the crew stays in the room.' : 'Stay put: when the host hits Play again, the new run starts for everyone.');
     }
     if (endShown && receipt && !runSaved) {
       runSaved = true;

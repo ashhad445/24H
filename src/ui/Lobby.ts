@@ -1,6 +1,11 @@
 // Title screen: host a room, join by code, or play solo.
 import { CFG } from '../config';
 import { Net } from '../net/Net';
+import { LOOK_COLORS, LOOK_HATS, type Look } from '../player/Avatar';
+
+/** What the player picked on the title screen. */
+export const lobbyChoice: { look: Look; daily: boolean } = { look: { c: LOOK_COLORS[0], h: 'cap' }, daily: false };
+const HAT_NAMES: Record<string, string> = { none: 'No hat', cap: 'Ball cap', cowboy: 'Cowboy hat', beanie: 'Beanie', bucket: 'Bucket hat', trucker: 'Trucker cap', party: 'Party hat', hardhat: 'Hard hat', sheriff: 'Sheriff hat', beehive: 'Beehive' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -24,9 +29,31 @@ export function runLobby(): Promise<Net> {
   const params = new URLSearchParams(location.search);
   if (params.get('room')) code.value = params.get('room')!.toUpperCase();
 
+  // bean colour + hat (remembered)
+  const look = lobbyChoice.look;
+  try {
+    const saved = JSON.parse(localStorage.getItem('rr-look') ?? 'null');
+    if (saved && LOOK_COLORS.includes(saved.c) && (LOOK_HATS as string[]).includes(saved.h)) { look.c = saved.c; look.h = saved.h; }
+    else { look.c = LOOK_COLORS[Math.floor(Math.random() * LOOK_COLORS.length)]; look.h = LOOK_HATS[1 + Math.floor(Math.random() * 4)]; }
+  } catch { /* storage blocked */ }
+  const colors = $('l-colors'), hat = $<HTMLSelectElement>('l-hat'), route = $<HTMLSelectElement>('l-route');
+  const paint = () => { for (const b of colors.children) b.classList.toggle('on', (b as HTMLElement).dataset.c === look.c); };
+  for (const c of LOOK_COLORS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.dataset.c = c; b.style.background = c; b.setAttribute('aria-label', `Bean colour ${c}`);
+    b.onclick = () => { look.c = c; paint(); };
+    colors.append(b);
+  }
+  paint();
+  for (const h of LOOK_HATS) hat.add(new Option(HAT_NAMES[h] ?? h, h));
+  hat.value = look.h;
+  hat.onchange = () => { look.h = hat.value; };
+  try { route.value = localStorage.getItem('rr-route') === 'daily' ? 'daily' : 'random'; } catch { /* ignore */ }
+
   return new Promise((resolve) => {
     const done = (n: Net) => {
-      try { localStorage.setItem('rr-name', name.value); } catch { /* ignore */ }
+      lobbyChoice.daily = route.value === 'daily';
+      try { localStorage.setItem('rr-name', name.value); localStorage.setItem('rr-look', JSON.stringify(look)); localStorage.setItem('rr-route', route.value); } catch { /* ignore */ }
       lobby.classList.add('hidden');
       resolve(n);
     };
@@ -49,14 +76,11 @@ export function runLobby(): Promise<Net> {
       const last = runs[runs.length - 1];
       if (last) {
         const wins = runs.filter((r) => /DELIVERED|SHOWDOWN WON/.test(r.ending)).length;
-        $('l-last').textContent = `Last run: ${last.ending.split(' — ')[0]} at mile ${Math.round(last.miles)} of ${last.total}, $${last.money.toFixed(0)} on the card. ${wins} of ${runs.length} runs delivered.`;
+        const won = runs.filter((r) => /DELIVERED|SHOWDOWN WON/.test(r.ending));
+        const best = won.length ? ` Best delivery: $${Math.max(...won.map((r) => r.money)).toFixed(0)} left on the card.` : '';
+        $('l-last').textContent = `Last run: ${last.ending.split(' — ')[0]} at mile ${Math.round(last.miles)} of ${last.total}, $${last.money.toFixed(0)} on the card. ${wins} of ${runs.length} runs delivered.${best}`;
       }
     } catch { /* storage blocked */ }
-    // "Play again" on the end screen reloads the page and comes straight back in
-    let again = '';
-    try { again = sessionStorage.getItem('rr-again') ?? ''; sessionStorage.removeItem('rr-again'); } catch { /* ignore */ }
-    if (again === 'solo') $('l-solo').click();
-    else if (again === 'host') $('l-host').click();
     code.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('l-join').click(); });
   });
 }

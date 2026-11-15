@@ -14,6 +14,17 @@
         <h1>🚐 Roadtrip Roulette</h1>
         <p class="sub">24 hours. $200. One beater RV. Show up to the wedding with at least $100 left.</p>
         <label>Your name <input id="l-name" maxlength="16" /></label>
+        <div class="l-look">
+          <span>Your bean</span>
+          <div id="l-colors"></div>
+          <select id="l-hat" aria-label="Hat"></select>
+        </div>
+        <label class="l-route">Route
+          <select id="l-route">
+            <option value="random">A new road every run</option>
+            <option value="daily">Today's road (same for everyone, all day)</option>
+          </select>
+        </label>
         <div class="row">
           <button id="l-host" class="primary">Host game</button>
           <button id="l-solo">Play solo</button>
@@ -52,6 +63,7 @@
       </div>
       <div id="top-center"><div id="cam-warn" class="hidden"></div><div id="objective" class="hidden"></div></div>
       <div id="chat"><div id="chat-log"></div><input id="chat-in" class="hidden" maxlength="120" placeholder="Say something to the crew… (Enter to send)" autocomplete="off" /></div>
+      <div id="pings"></div>
       <div id="reticle"></div>
       <div id="prompt" class="hidden"></div>
       <div id="hotbar"><div id="hb-name"></div><div class="hb-row"><div class="hb-slot"><i>1</i><span class="hb-icon"></span><b class="hb-count"></b><em class="hb-price"></em></div><div class="hb-slot"><i>2</i><span class="hb-icon"></span><b class="hb-count"></b><em class="hb-price"></em></div><div class="hb-slot"><i>3</i><span class="hb-icon"></span><b class="hb-count"></b><em class="hb-price"></em></div></div></div>
@@ -97,6 +109,8 @@
             <tr><td>F</td><td>Stand up</td></tr>
             <tr><th colspan="2">Anywhere</th></tr>
             <tr><td>Enter</td><td>Crew chat</td></tr>
+            <tr><td>T / Middle-click</td><td>Ping what you're looking at</td></tr>
+            <tr><td>B · V · C</td><td>Wave · dance · cheer</td></tr>
             <tr><td>Tab</td><td>Crew list · room code</td></tr>
           </table>
         </details>
@@ -116,7 +130,7 @@
         <div class="end-in">
           <h1></h1>
           <div id="receipt" class="hidden"></div>
-          <div class="end-btns"><button id="e-again" class="primary">Play again</button><button id="e-lobby">Back to the lobby</button></div>
+          <div class="end-btns"><button id="e-again" class="primary">Play again (same crew)</button><button id="e-lobby">Back to the lobby</button></div>
           <p id="e-note"></p>
         </div>
       </div>

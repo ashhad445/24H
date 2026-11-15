@@ -5,6 +5,8 @@ import { PoolLight } from '../fx/LightPool';
 import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
 import { RVPolish, dressRVMaterials } from './RVPolish';
+import { dressRVKit } from './RVKit';
+import { Assets } from '../core/AssetLoader';
 import { boxGeo } from '../fx/ProcTex';
 import { groundY } from '../world/World';
 import { CHARM2_QUOTES, CHARM_QUOTES } from './charmQuotes';
@@ -115,6 +117,9 @@ export class RVModel {
   private binRocks: THREE.Mesh[] = [];
   private lastSpeed = 0;
   private polish!: RVPolish;
+  /** Procedural exterior bits that rvkit.glb replaces (see RVKit.ts). */
+  kitHide: THREE.Object3D[] = [];
+  kitWheels: { spin: THREE.Group; side: number; proc: THREE.Object3D[] }[] = [];
   /** Side-mirror glass + camera mounts, for main.ts to render live views into. */
   sideMirrors!: RVPolish;
   private radioNeedle!: THREE.Mesh;
@@ -204,17 +209,17 @@ export class RVModel {
     hood.position.set(0, 1.42, -3.62); hood.rotation.x = -0.12;
     const grille = this.box(M.dark, -0.75, 0.75, 0.62, 1.12, RV.noseZ, RV.noseZ + 0.06); // grille
     this.reg('radiator', grille, (s, c) => (c.held === 'coolant' ? 'Pour coolant into radiator' : c.held === 'ice' ? 'Dump the ice on the radiator' : c.held === 'energy' ? 'Pour energy drink into radiator (desperate)' : s.steam ? 'Radiator is boiling over!' : ''));
-    for (let i = 0; i < 5; i++) this.box(M.chrome, -0.72, 0.72, 0.66 + i * 0.1, 0.69 + i * 0.1, RV.noseZ - 0.01, RV.noseZ + 0.02);
-    this.box(M.chrome, -1.36, 1.36, 0.42, 0.62, RV.noseZ - 0.08, RV.noseZ + 0.06, true); // bumper
-    this.box(M.chrome, -1.38, 1.38, 0.42, 0.62, zRear + 0.04, zRear + 0.18, true); // rear bumper
+    for (let i = 0; i < 5; i++) this.kitHide.push(this.box(M.chrome, -0.72, 0.72, 0.66 + i * 0.1, 0.69 + i * 0.1, RV.noseZ - 0.01, RV.noseZ + 0.02));
+    this.kitHide.push(this.box(M.chrome, -1.36, 1.36, 0.42, 0.62, RV.noseZ - 0.08, RV.noseZ + 0.06, true)); // bumper
+    this.kitHide.push(this.box(M.chrome, -1.38, 1.38, 0.42, 0.62, zRear + 0.04, zRear + 0.18, true)); // rear bumper
     // overcab
     this.box(M.cream, -halfW, halfW, 2.35, roofY, -3.9, zFront - 0.06, true);
     this.glass(0, 2.72, -3.91, 'z', 1.6, 0.35);
     for (let i = -2; i <= 2; i++) this.box(M.amber, i * 0.45 - 0.06, i * 0.45 + 0.06, roofY - 0.06, roofY, -3.93, -3.89);
     // roof AC + ladder + spare
-    this.box(M.lining, -0.45, 0.45, roofY, roofY + 0.35, 0.3, 1.3, true);
-    for (const lx of [0.85, 1.25]) this.box(M.steel, lx - 0.02, lx + 0.02, 0.7, roofY + 0.2, zRear + 0.12, zRear + 0.16);
-    for (let y = 0.9; y < roofY; y += 0.32) this.box(M.steel, 0.85, 1.25, y, y + 0.03, zRear + 0.12, zRear + 0.16);
+    this.kitHide.push(this.box(M.lining, -0.45, 0.45, roofY, roofY + 0.35, 0.3, 1.3, true));
+    for (const lx of [0.85, 1.25]) this.kitHide.push(this.box(M.steel, lx - 0.02, lx + 0.02, 0.7, roofY + 0.2, zRear + 0.12, zRear + 0.16));
+    for (let y = 0.9; y < roofY; y += 0.32) this.kitHide.push(this.box(M.steel, 0.85, 1.25, y, y + 0.03, zRear + 0.12, zRear + 0.16));
     this.box(M.steel, -0.75, -0.05, 0.95, 1.0, zRear + 0.04, zRear + 0.1); // spare tire carrier
     // stripes (skip the door gap on the right)
     const stripe = (side: number, z0: number, z1: number) => {
@@ -238,7 +243,7 @@ export class RVModel {
     for (const s of [-1, 1]) {
       const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.05, 16).rotateX(Math.PI / 2), this.headLens);
       lens.position.set(s * 0.98, 0.9, RV.noseZ + 0.02); this.body.add(lens);
-      this.box(M.chrome, s * 0.98 - 0.17, s * 0.98 + 0.17, 0.74, 1.06, RV.noseZ + 0.03, RV.noseZ + 0.1);
+      this.kitHide.push(this.box(M.chrome, s * 0.98 - 0.17, s * 0.98 + 0.17, 0.74, 1.06, RV.noseZ + 0.03, RV.noseZ + 0.1));
       const sl = new THREE.SpotLight('#fff1cf', 0, 90, 0.5, 0.45, 1);
       sl.position.set(s * 0.98, 0.9, RV.noseZ - 0.1);
       sl.target.position.set(s * 0.6, -0.5, RV.noseZ - 25);
@@ -269,6 +274,7 @@ export class RVModel {
         const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.37, 12).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#8a4b2a', roughness: 0.6, metalness: 0.7 }));
         rim.visible = false; spin.add(rim);
         this.wheels.push({ g, spin, front, rim });
+        this.kitWheels.push({ spin, side: s, proc: [tire, hub, nut] });
         this.reg(`wheel_${wi}`, g, (s, c) => (c.cab.flat !== wi ? '' : c.held !== 'spare' && c.held !== 'tape' ? 'Flat tire! Spare is on the back (or duct tape)' : Math.abs(s.speed) > 0.5 ? 'Stop the RV first!' : c.held === 'tape' ? 'Duct-tape the tire' : `Bolt on spare (${c.cab.nuts}/4)`));
       }
     }
@@ -558,6 +564,7 @@ export class RVModel {
     }
 
     this.polish = new RVPolish(this.body, this.M);
+    Assets.onReady(() => dressRVKit(this));
     this.sideMirrors = this.polish;
     this.reg('charm', this.polish.charmHit, (s) => `💀 "${CHARM_QUOTES[s.charm] ?? ''}"  — rub for another`);
     this.reg('charm2', this.polish.charm2Hit, (s) => `⚰️ "${CHARM2_QUOTES[s.charm2] ?? ''}"  — rub for another`);

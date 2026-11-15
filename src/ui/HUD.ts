@@ -102,6 +102,9 @@ export class HUD {
     this.el.receipt.classList.remove('hidden');
   }
 
+  /** A new run started: put the receipt away. */
+  hideReceipt() { this.el.receipt.classList.add('hidden'); this.el.receipt.innerHTML = ''; }
+
   /** End-screen buttons. `again` = what "Play again" does for this player, or null to hide it. */
   endButtons(again: (() => void) | null, lobby: () => void, note: string) {
     const a = $('e-again');
@@ -312,7 +315,8 @@ export class HUD {
         + (this.texts.length ? `<div class="tab-texts">💍 Kevin: ${this.texts.slice(-2).map(esc).join('<br>')}</div>` : '');
     }
 
-    if (s.phase === 'ended') { this.el.end.classList.remove('hidden'); this.el.end.querySelector('h1')!.textContent = s.ending; }
+    this.el.end.classList.toggle('hidden', s.phase !== 'ended');
+    if (s.phase === 'ended') this.el.end.querySelector('h1')!.textContent = s.ending;
 
     this.el.dev.classList.toggle('hidden', !opts.dev);
     if (opts.dev) this.el.dev.textContent = opts.dev;
