@@ -455,6 +455,13 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Signs** (`roadSigns()`): CURVE xx MPH (from the RV's real steering limit), chevrons on tight bends, % GRADE, TRUCKS USE LOW GEAR, ROAD NARROWS, ONE LANE EACH WAY, FALLING ROCKS. Cliff shelves drop boulders (reuses the canyon rockfall, from the wall side).
   - **Terrain**: lattice rows bend toward a smoothed road frame 25–70 m out so the mesh never folds on tight bends; mountains crowd the road (taller hills, narrower flat corridor), shelf walls and drops are terrain terms plus staggered cliff blocks; steep faces get a banded rock tint. Speed cameras only on straights; road encounters only on flat calm road (straight / sweepers).
   - Paper map shows this run's stop miles and marks mountains, cliff roads, narrow passes and twisty bits.
+- [x] **Agent playtest fixes** (from two scripted Haiku agents playing co-op through `?dev` hooks):
+  - Off-road: no damage for the first 1.5 s, then 0.15 integrity/s (was 0.4/s, silent), with a warning toast.
+  - Feedback toasts: "Hard hit! RV integrity N%" on big jolts, "nodding off" before the driver sleeps (hypno > 0.7), a `💳 −$X what → $Y left` toast for any charge of $10 or more, and a "put the patty in a bun" hint when feeding a plain patty. "Skillet is full" is throttled.
+  - Pace hint: every 3 game hours (to 24:00) a toast gives miles left and the average speedometer mph needed.
+  - `Host.handle` ignores an `act` without a string id (it used to crash the host page).
+  - Dev hooks (`window.game`, `?dev` only): `nearby`, `goto`, `use` (also `use('hull')` with a hammer or tape in hand), `useHeld`, `drop`, `held`, `hud`.
+  - The Playwright bridge that drives two players (host + client) over HTTP lives outside the repo; a playtest run is still unscored and not a balance verdict.
 ### Phase 7 — Voice chat, cosmetics, player list polish, Return‑to‑RV
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
