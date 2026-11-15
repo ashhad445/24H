@@ -50,6 +50,7 @@ export class HostSim implements StopHost {
   private hammerCd = new Map<number, number>();
   private warned = new Set<string>();
   private offT = 0;
+  private paceHr = 0;
   private lowHp = new Set<number>();
   /** Seconds of blowout immunity after a flat (so tires don't pop back-to-back). */
   private tireGrace = 60;
@@ -869,6 +870,14 @@ export class HostSim implements StopHost {
     // ---------- clock & endings ----------
     s.clock += dt * CFG.TIME_SCALE;
     this.once('plot', '🌿 THE JOB: get the stash to Kevin\'s wedding before 24:00. Miss it and the Bonetti mafia — who paid for it — comes for you.');
+    const hr = Math.floor(s.clock / 10800);
+    if (hr >= 1 && hr < 8 && this.paceHr !== hr) {
+      this.paceHr = hr;
+      const left = Math.max(0, totalMilesWith(s.route) - Math.abs(rv.z) * CFG.MILES_PER_METER);
+      const hrsLeft = Math.max(0.1, CFG.RUN_HOURS - s.clock / 3600);
+      const need = Math.round((left / (hrsLeft / CFG.TIME_SCALE)) * 2.237 / (3600 * CFG.MILES_PER_METER));
+      this.toast(`⏱️ ${Math.round(left)} mi to go, ${Math.round(hrsLeft)} h left — you need to average ~${need} mph (stops included)`);
+    }
     this.stepMafia(dt);
     if (rv.integrity <= 0) { s.phase = 'ended'; s.ending = 'TOTALED — the RV fell apart in the desert.'; }
     if (s.clock >= CFG.RUN_HOURS * 3600 && !s.mafia.on) {

@@ -598,6 +598,7 @@ async function start() {
       },
       /** Interact with something within reach (like E / LMB / RMB on it). Rusty's car heists play the minigame with ~75% skill. */
       use(id: string, btn = 0) {
+        if (id === 'hull') { const h = heldNow(); if (!h || (h.k !== 'hammer' && h.k !== 'tape')) return 'hold a hammer or duct tape first'; act('hull', btn); return 'ok'; }
         const o = find(id); if (!o) return 'not found / not visible: ' + id;
         const d = centre(o).distanceTo(camera.getWorldPosition(new THREE.Vector3()));
         if (d > 4.5) return `out of reach (${d.toFixed(1)} m) — goto it first`;
