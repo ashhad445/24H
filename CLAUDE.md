@@ -487,10 +487,18 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Sound**: footsteps (cabin floor vs dirt, from `Player.stepPhase`), landing thud, pocket-switch tick, interface click / hover sounds on every button.
   - Pause menu dims the world behind it.
   - Test note: two software-rendered browsers peak at 2–4 GB each during shader warm-up in this container, which can get a tab killed. That is the test rig, not a leak: play holds steady (geometries / textures / JS heap flat across 100 s of two-player play and four restarts).
+- [x] **Feel pass + cabin furniture** (screenshots of the cabin, the held-item view and the Tab board; typecheck + sims):
+  - **First-person hand** (`items/ItemViews.ts`): your bean arm (your colour) under the held item; the item lags the view, bobs with steps, flies into the hand on pickup, rises on a pocket switch, jabs on use / throw, kicks back on a gunshot. Big props are held smaller (`FP_SCALE`). `ItemViews.feel()` / `punch()` are fed by `main.ts`.
+  - **Camera** (`player/Player.ts`): landing dip spring, strafe lean, eased slide into / out of seats, +4° view while sprinting.
+  - **Tab crew board**: room code, road seed, heat, one row per player (colour, host / you, doing, holding, health, hunger), Kevin's last texts.
+  - **`items2.glb`** (`art/items2.py`, `GLB_ITEMS2`): rocket fuel, stash, battery, catalytic converter, wheel, spare, fuse, sponge, suitcase, water, ice, cactus, cocktail, rock.
+  - **`rvinterior.glb`** (`art/rvinterior.py`, placed by `rv/RVInterior.ts`): captain's chairs, dinette benches and table, stove top, sink with faucet. Each replaces the boxes listed in `RVModel.inHide` only if it loaded; colliders and surfaces stay procedural, and the seat models carry the seats' interact ids. The file also holds `overhead` and `cupholder`, not placed yet.
 ### Phase 7 — Voice chat, player list polish
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
 ## 23. Current Build Status
+**2026‑11‑16 — Feel pass + cabin furniture.** Not looked at in the game yet: the 14 new hand props and the throw sound. Needs a human playtest for feel.
+
 **2026‑11‑15 — Presentation pass**: HUD v2, title screen, loading veil + intro card, footsteps and interface sounds. Needs a human playtest for feel and readability at speed.
 
 **2026‑11‑15 — Same-crew restart, bean looks, emotes, pings, daily road, Blender RV kit + hand props.** Checked with a two-player headless browser run; needs a human playtest. Not built: host migration, late-join catch-up of an emote in progress, off-screen ping arrows.
