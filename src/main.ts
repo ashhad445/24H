@@ -228,6 +228,7 @@ async function start() {
   if (isHost) startRun();
   else shared = blankState();
   const items = new ItemViews(rv, dyn, camera, avatars, net.myId);
+  items.setArmColor(lobbyChoice.look.c);
   const avatarOf = (id: number) => {
     let a = avatars.get(id);
     if (!a) { a = new Avatar(id, nameOf(id), rv, dyn, looks.get(id)); avatars.set(id, a); }
@@ -406,6 +407,7 @@ async function start() {
     rv.update(shared.rv, shared.cab, dt);
     rv.root.updateMatrixWorld(true);
 
+    const lookDX = input.mouseDX, lookDY = input.mouseDY;
     const drive = player.update(dt, input, shared, net.myId);
     if (drive) {
       // send changes at once, otherwise just often enough to keep the host's input alive
@@ -486,7 +488,7 @@ async function start() {
     if (rockThrow) dropHeld(32);
     // pistol: LMB fires along the crosshair (unless pointing at a shop/dealer prompt)
     const gunShot = held?.k === 'pistol' && input.clicked(0) && !look.id.startsWith('rusty:');
-    if (gunShot) { const o = camera.getWorldPosition(new THREE.Vector3()), d = camera.getWorldDirection(new THREE.Vector3()); net.toHost({ t: 'shoot', o: [o.x, o.y, o.z], d: [d.x, d.y, d.z] }); }
+    if (gunShot) { items.punch(-0.6); player.kick(-0.01); const o = camera.getWorldPosition(new THREE.Vector3()), d = camera.getWorldDirection(new THREE.Vector3()); net.toHost({ t: 'shoot', o: [o.x, o.y, o.z], d: [d.x, d.y, d.z] }); }
     const holding = input.mouseDown(0) || (input.down('KeyE') && player.seat !== 'driver');
     const holdable = HOLD_IDS.has(look.id);
     const heistCar = /^rusty:(?:car(\d+)|suv)$/.exec(look.id);
@@ -502,7 +504,7 @@ async function start() {
       // the driver's E is the upshift, so they interact with the mouse only
       if (gunShot) { /* fired */ } else if ((input.pressed('KeyE') && player.seat !== 'driver') || input.clicked(0)) {
         if (heistCar) startHeist(heistCar[1] ? Number(heistCar[1]) : 1, held);
-        else act(look.id, 0);
+        else { act(look.id, 0); if (held) items.punch(0.7); }
       } else if (input.clicked(2) && !rockThrow) act(look.id, 2);
     } else if (held) {
       if (held.k === 'extinguisher') {
@@ -517,7 +519,7 @@ async function start() {
           act('spray', aimed ? 1 : 0);
         }
       } else if (held.k === 'map' && input.clicked(0)) mapView.toggle();
-      else if (input.clicked(0) && (KINDS[held.k]?.food || held.k === 'scratch' || held.k === 'suitcase')) act('self');
+      else if (input.clicked(0) && (KINDS[held.k]?.food || held.k === 'scratch' || held.k === 'suitcase')) { act('self'); items.punch(); }
       if (input.clicked(2) && !rockThrow) dropHeld(7);
     }
     if (held && input.pressed('KeyG')) dropHeld(1.2);
@@ -565,6 +567,7 @@ async function start() {
     if (DEV && host && input.pressed('F7')) { host.s.weather.storm = 1; (host as any).stormLeft = 60; hud.toast('DEV: sandstorm'); }
     if (DEV && host && input.pressed('F5')) { const k = ENC_KINDS[devEnc++ % ENC_KINDS.length]; host.s.enc.list = []; host.enc.spawn(k); hud.toast(`DEV: encounter ${k}`); }
     if (DEV && host && input.pressed('F6')) { host.s.clock = (22 - CFG.START_HOUR) * 3600; hud.toast('DEV: 22:00'); }
+    items.feel(dt, lookDX, lookDY, player.stepPhase, player.onGround && !player.seat && player.vel.lengthSq() > 1, player.seat ? 0 : player.vel.y);
     items.sync(shared.items, dt, shared.crew);
     if (input.wheel) { act(`slot:${input.wheel > 0 ? 1 : -1}`); sound.play('tick'); }
     for (const [k, n] of [['Digit1', 0], ['Digit2', 1], ['Digit3', 2]] as const) if (input.pressed(k)) act(`slot:${(n - (shared.crew[net.myId]?.slot ?? 0) + 3) % 3}`);
@@ -600,7 +603,7 @@ async function start() {
 
     // ---------- juice ----------
     // speed widens the view a touch; the cabin rumbles with the engine and the road
-    const targetFov = settings.fov + (player.inRV ? Math.min(1, Math.max(0, (mph - 40) / 160)) * 14 + (r.nosT > 0 ? 9 : 0) : 0);
+    const targetFov = settings.fov + (player.sprinting ? 4 : 0) + (player.inRV ? Math.min(1, Math.max(0, (mph - 40) / 160)) * 14 + (r.nosT > 0 ? 9 : 0) : 0);
     if (Math.abs(targetFov - fov) > 0.01) {
       fov += (targetFov - fov) * Math.min(1, dt * 2);
       camera.fov = fov; camera.updateProjectionMatrix();
@@ -644,8 +647,8 @@ async function start() {
       } catch { /* storage blocked */ }
     }
 
-    const players = [...net.names.entries()].map(([id, n]) =>
-      `${n}${id === net.hostId ? ' (host)' : ''}${id === net.myId ? ' ← you' : ''}${shared.seats.driver === id ? ' 🚗' : shared.seats.nav === id ? ' 🗺️' : ''}`);
+    const colorOf = (id: number) => id === net.myId ? lobbyChoice.look.c : looks.get(id)?.c ?? '#' + new THREE.Color(PLAYER_COLORS[(id - 1) % PLAYER_COLORS.length]).getHexString();
+    const players = [...net.names.entries()].map(([id, name]) => ({ id, name, color: colorOf(id), host: id === net.hostId, you: id === net.myId }));
     const crewList = [...net.names.entries()].filter(([id]) => id !== net.myId).map(([id, name]) => ({ id, name, color: looks.get(id)?.c ?? '#' + new THREE.Color(PLAYER_COLORS[(id - 1) % PLAYER_COLORS.length]).getHexString() }));
     hud.update(shared, {
       crew: crewList,
@@ -691,6 +694,7 @@ async function start() {
     p.y -= 0.2;
     const v = dir.multiplyScalar(speed).add(player.vel);
     v.y += speed > 20 ? 0.8 : speed > 2 ? 1.5 : 0;
+    if (speed > 2) { sound.play('throw'); items.punch(); }
     net.toHost({ t: 'drop', inRV: player.inRV, p: [p.x, p.y, p.z], v: [v.x, v.y, v.z] });
   };
 

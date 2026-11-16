@@ -156,11 +156,13 @@ function bag(color: string, ink: string, text: string, w: number, h: number, d: 
 }
 
 const GLB_ITEMS = new Set(['extinguisher', 'hammer', 'jerrycan', 'coolant', 'pistol', 'nozzle', 'tape', 'coffee']);
+const GLB_ITEMS2 = new Set(['rocket', 'weed', 'battery', 'cat', 'wheel', 'spare', 'fuse', 'sponge', 'suitcase', 'water', 'ice', 'cactus', 'cocktail', 'rock']);
 
 /** Build the mesh for an item. Origin is at the item's center. */
 export function buildItemMesh(k: string): THREE.Object3D {
   // Blender-built props (art/items.py) once they have loaded; procedural otherwise
   if (GLB_ITEMS.has(k)) { const n = Assets.node('items', k); if (n) return n; }
+  if (GLB_ITEMS2.has(k)) { const n = Assets.node('items2', k); if (n) return n; } // art/items2.py
   const cyl = (r: number, h: number, seg = 14) => new THREE.CylinderGeometry(r, r, h, seg);
   switch (k) {
     case 'patty': {

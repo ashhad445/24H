@@ -294,6 +294,7 @@ export class Sound {
       case 'stepdirt': this.noiseBurst(0.07, 1500, 0.12); this.noiseBurst(0.04, 300, 0.12, 0, 'lowpass'); break;
       case 'land': this.tone(80, 45, 0.14, 'sine', 0.3); this.noiseBurst(0.09, 350, 0.25, 0, 'lowpass'); break;
       case 'ui': this.tone(660, 990, 0.06, 'triangle', 0.12); break;
+      case 'throw': this.noiseBurst(0.13, 800, 0.16); break;
       case 'tick': this.noiseBurst(0.012, 2400, 0.1); break;
       case 'ratchet': for (let i = 0; i < 4; i++) this.noiseBurst(0.02, 2500, 0.2, i * 0.05); break;
       case 'shift': this.noiseBurst(0.06, 900, 0.3); break;

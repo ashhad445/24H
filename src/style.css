@@ -365,3 +365,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1210; fon
 
 /* pause: dim the world behind the menu */
 #pause { box-shadow: 0 0 0 100vmax rgba(10, 6, 3, .5), 0 20px 60px rgba(0, 0, 0, .6); border-width: 1px; background: rgba(28, 18, 11, .96); }
+
+/* ---------- Tab crew board ---------- */
+#tab { top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); padding: 16px 18px 12px; border-radius: 16px; font-size: 13px; line-height: 1.3; min-width: min(640px, calc(100vw - 32px)); box-shadow: 0 18px 50px rgba(0, 0, 0, .5); }
+.tb-head { display: flex; gap: 26px; padding: 0 6px 12px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.tb-head small, .tb-texts small { display: block; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; opacity: .6; font-weight: 700; }
+.tb-head b { font-size: 22px; letter-spacing: 2px; color: var(--orange); }
+.tb-head b.hot { letter-spacing: 0; }
+.tb-cols, .tb-row { display: grid; grid-template-columns: 12px 1.3fr 1fr 1.3fr 84px 84px; gap: 10px; align-items: center; padding: 6px; }
+.tb-cols { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; opacity: .55; font-weight: 700; padding-bottom: 2px; }
+.tb-row { border-radius: 9px; font-weight: 600; }
+.tb-row.you { background: rgba(255, 255, 255, .07); }
+.tb-row i { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255, 255, 255, .25); }
+.tb-name { font-size: 15px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-name small { margin-left: 6px; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; background: rgba(255, 255, 255, .14); border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
+.tb-role, .tb-held { opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-held s { text-decoration: none; opacity: .45; }
+.tb-bar { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.tb-bar em { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .14); overflow: hidden; }
+.tb-bar b { display: block; height: 100%; }
+.tb-bar b.hp { background: #e53935; } .tb-bar b.hu { background: var(--orange); } .tb-bar b.hu.low { background: var(--bad); }
+.tb-texts { margin: 10px 6px 0; padding-top: 10px; border-top: 1px solid var(--line); max-width: 600px; }
+.tb-texts p { margin: 3px 0 0; opacity: .9; }
+.tb-foot { margin: 10px 6px 0; font-size: 11px; opacity: .5; }
+@media (max-width: 700px) { .tb-cols span:nth-child(3), .tb-row .tb-role { display: none; } .tb-cols, .tb-row { grid-template-columns: 12px 1.2fr 1.2fr 70px 70px; } }

@@ -6,6 +6,7 @@ import { CFG, RADIO_STATIONS, RV, WHEELBASE, gearInfo } from '../config';
 import type { CabinState, RVState } from '../types';
 import { RVPolish, dressRVMaterials } from './RVPolish';
 import { dressRVKit } from './RVKit';
+import { dressRVInterior } from './RVInterior';
 import { Assets } from '../core/AssetLoader';
 import { boxGeo } from '../fx/ProcTex';
 import { groundY } from '../world/World';
@@ -119,6 +120,8 @@ export class RVModel {
   private polish!: RVPolish;
   /** Procedural exterior bits that rvkit.glb replaces (see RVKit.ts). */
   kitHide: THREE.Object3D[] = [];
+  /** Procedural furniture the interior kit replaces (rv/RVInterior.ts), by piece. */
+  inHide: Record<string, THREE.Object3D[]> = { seat: [], bench: [], table: [], stove: [], sink: [] };
   kitWheels: { spin: THREE.Group; side: number; proc: THREE.Object3D[] }[] = [];
   /** Side-mirror glass + camera mounts, for main.ts to render live views into. */
   sideMirrors!: RVPolish;
@@ -302,7 +305,7 @@ export class RVModel {
       const seat = SEATS[s < 0 ? 'driver' : 'nav'].pos;
       const base = this.box(M.seat, seat.x - 0.33, seat.x + 0.33, floorY, seat.y, seat.z - 0.3, seat.z + 0.25);
       const back = this.box(M.seat, seat.x - 0.33, seat.x + 0.33, seat.y, seat.y + 0.85, seat.z + 0.25, seat.z + 0.38);
-      this.box(M.seat, seat.x - 0.2, seat.x + 0.2, seat.y + 0.85, seat.y + 1.05, seat.z + 0.27, seat.z + 0.36);
+      this.inHide.seat.push(base, back, this.box(M.seat, seat.x - 0.2, seat.x + 0.2, seat.y + 0.85, seat.y + 1.05, seat.z + 0.27, seat.z + 0.36));
       const id = s < 0 ? 'seat_driver' : 'seat_nav';
       this.reg(id, base, () => (s < 0 ? 'Sit: Driver' : 'Sit: Navigator'));
       this.reg(id, back, () => (s < 0 ? 'Sit: Driver' : 'Sit: Navigator'));
@@ -409,19 +412,21 @@ export class RVModel {
 
     // ---------- living area ----------
     // dinette (left)
-    this.box(M.cushion, -innerHalfW, -0.6, floorY, 1.08, -1.0, -0.5); // bench front
-    this.box(M.cushion, -innerHalfW, -0.6, 1.08, 1.75, -1.0, -0.88);
-    this.box(M.cushion, -innerHalfW, -0.6, floorY, 1.08, 0.75, 1.25); // bench rear
-    this.box(M.cushion, -innerHalfW, -0.6, 1.08, 1.75, 1.13, 1.25);
-    this.box(M.woodLight, -innerHalfW, -0.62, 1.34, 1.38, -0.42, 0.68); // table
-    this.box(M.steel, -0.95, -0.9, floorY, 1.34, 0.1, 0.16);
+    this.inHide.bench.push(
+      this.box(M.cushion, -innerHalfW, -0.6, floorY, 1.08, -1.0, -0.5), // bench front
+      this.box(M.cushion, -innerHalfW, -0.6, 1.08, 1.75, -1.0, -0.88),
+      this.box(M.cushion, -innerHalfW, -0.6, floorY, 1.08, 0.75, 1.25), // bench rear
+      this.box(M.cushion, -innerHalfW, -0.6, 1.08, 1.75, 1.13, 1.25));
+    this.inHide.table.push(
+      this.box(M.woodLight, -innerHalfW, -0.62, 1.34, 1.38, -0.42, 0.68), // table
+      this.box(M.steel, -0.95, -0.9, floorY, 1.34, 0.1, 0.16));
     this.colliders.push({ x0: -innerHalfW, x1: -0.58, z0: -1.02, z1: 1.27, top: 1.38 });
     // galley (right, behind the door)
     this.box(M.wood, 0.72, innerHalfW, floorY, 1.5, -0.3, 2.3, false, true);
     this.box(M.counter, 0.7, innerHalfW, 1.5, 1.55, -0.32, 2.3);
-    this.box(M.black, 0.8, 1.2, 1.55, 1.6, 0.0, 0.7); // camp stove
-    for (const bz of [0.17, 0.53]) { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.012, 6, 18).rotateX(Math.PI / 2), M.steel); ring.position.set(1.0, 1.61, bz); this.body.add(ring); }
-    this.box(M.steel, 0.82, 1.22, 1.5, 1.555, 1.3, 1.9); // sink
+    this.inHide.stove.push(this.box(M.black, 0.8, 1.2, 1.55, 1.6, 0.0, 0.7)); // camp stove
+    for (const bz of [0.17, 0.53]) { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.012, 6, 18).rotateX(Math.PI / 2), M.steel); ring.position.set(1.0, 1.61, bz); this.body.add(ring); this.inHide.stove.push(ring); }
+    this.inHide.sink.push(this.box(M.steel, 0.82, 1.22, 1.5, 1.555, 1.3, 1.9)); // sink
     // burner knob on the counter front (faces the aisle)
     this.stoveKnob = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 12).rotateZ(Math.PI / 2), M.black);
     this.stoveKnob.position.set(0.69, 1.4, 0.35); this.body.add(this.stoveKnob);
@@ -565,6 +570,7 @@ export class RVModel {
 
     this.polish = new RVPolish(this.body, this.M);
     Assets.onReady(() => dressRVKit(this));
+    Assets.onReady(() => dressRVInterior(this));
     this.sideMirrors = this.polish;
     this.reg('charm', this.polish.charmHit, (s) => `💀 "${CHARM_QUOTES[s.charm] ?? ''}"  — rub for another`);
     this.reg('charm2', this.polish.charm2Hit, (s) => `⚰️ "${CHARM2_QUOTES[s.charm2] ?? ''}"  — rub for another`);

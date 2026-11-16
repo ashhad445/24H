@@ -233,7 +233,7 @@ export class HUD {
     this.flyEl.textContent = `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)}`;
   }
 
-  update(s: SharedState, opts: { crew: { id: number; name: string; color: string }[]; prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: string[]; objective: string; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
+  update(s: SharedState, opts: { crew: { id: number; name: string; color: string }[]; prompt: string; seat: SeatRole; locked: boolean; tab: boolean; room: string; players: { id: number; name: string; color: string; host: boolean; you: boolean }[]; objective: string; dev: string; myId: number; stamina: number; boost: { t: number; drain: number }; held: string; inRV: boolean; dt: number; cam: number | null }) {
     const remaining = Math.max(0, CFG.RUN_HOURS * 3600 - s.clock);
     const tod = CFG.START_HOUR * 3600 + s.clock;
     const day = Math.floor(tod / 86400) + 1;
@@ -374,8 +374,19 @@ export class HUD {
     if (!opts.locked) this.el.room.textContent = opts.room === 'SOLO' ? 'Solo run' : `Room code: ${opts.room}`;
     this.el.tab.classList.toggle('hidden', !opts.tab);
     if (opts.tab) {
-      this.el.tab.innerHTML = `<div class="tab-code">Room <b>${opts.room}</b></div>` + opts.players.map((p) => `<div>${esc(p)}</div>`).join('')
-        + (this.texts.length ? `<div class="tab-texts">💍 Kevin: ${this.texts.slice(-2).map(esc).join('<br>')}</div>` : '');
+      const rows = opts.players.map((p) => {
+        const st = s.crew[p.id];
+        const role = s.seats.driver === p.id ? '🚗 Driving' : s.seats.nav === p.id ? '🗺️ Navigating' : 'On their feet';
+        const it = s.items.find((i) => i.h === p.id && i.sl === (st?.slot ?? 0));
+        const hpC = Math.round(st?.hp ?? 100), huC = Math.round(st?.hunger ?? 100);
+        return `<div class="tb-row${p.you ? ' you' : ''}"><i style="background:${p.color}"></i><span class="tb-name">${esc(p.name)}${p.host ? '<small>host</small>' : ''}${p.you ? '<small>you</small>' : ''}</span><span class="tb-role">${role}</span>`
+          + `<span class="tb-held">${it ? `${itemIcon(it.k)} ${esc(itemName(it.k, it.d))}` : '<s>empty hands</s>'}</span>`
+          + `<span class="tb-bar"><em><b class="hp" style="width:${hpC}%"></b></em>${hpC}</span><span class="tb-bar"><em><b class="hu${huC < 25 ? ' low' : ''}" style="width:${huC}%"></b></em>${huC}</span></div>`;
+      }).join('');
+      this.html(this.el.tab, `<div class="tb-head"><div><small>${opts.room === 'SOLO' ? 'Solo run' : 'Room code'}</small><b>${opts.room === 'SOLO' ? '—' : opts.room}</b></div><div><small>Road</small><b>#${s.seed}</b></div><div><small>Heat</small><b class="${s.heat > 0 ? 'hot' : ''}">${s.heat > 0 ? '🚔'.repeat(Math.min(5, s.heat)) : 'clean'}</b></div></div>`
+        + `<div class="tb-cols"><span></span><span>Bean</span><span>Doing</span><span>Holding</span><span>❤️</span><span>🍔</span></div>${rows}`
+        + (this.texts.length ? `<div class="tb-texts"><small>💍 Kevin</small>${this.texts.slice(-2).map((t) => `<p>${esc(t)}</p>`).join('')}</div>` : '')
+        + `<div class="tb-foot">Esc for settings and the invite link</div>`);
     }
 
     this.el.end.classList.toggle('hidden', s.phase !== 'ended');

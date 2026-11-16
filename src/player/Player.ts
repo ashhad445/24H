@@ -26,6 +26,13 @@ export class Player {
   /** Advances by π per footstep while walking (main plays the footfalls). */
   get stepPhase() { return this.bob; }
   private shake = 0;
+  /** True while actually sprinting (main widens the view a touch). */
+  sprinting = false;
+  private dip = 0;
+  private dipV = 0;
+  private lean = 0;
+  private ease = new THREE.Vector3();
+  private easePending = false;
   private kickP = 0;
   private kickV = 0;
   /** 0..~1.5 continuous cabin vibration (set each frame by main). */
@@ -53,10 +60,12 @@ export class Player {
     // seat assignment comes from the host
     const seat: SeatRole = shared.seats.driver === myId ? 'driver' : shared.seats.nav === myId ? 'nav' : '';
     if (seat && seat !== this.seat) {
+      this.easePending = this.inRV; // slide into the seat instead of teleporting (only when the camera stays in the RV frame)
       this.setInRV(true);
       this.yaw = 0; this.pitch = -0.28; this.vel.set(0, 0, 0);
     } else if (!seat && this.seat) {
       this.pos.copy(SEATS[this.seat].stand); this.vel.set(0, 0, 0);
+      this.easePending = true;
     }
     this.seat = seat;
 
@@ -67,6 +76,7 @@ export class Player {
 
     let drive: DriveInput | null = null;
     if (this.seat) {
+      this.sprinting = false; this.lean *= 0.8;
       this.yaw = THREE.MathUtils.clamp(this.yaw, -2.0, 2.0);
       this.pitch = THREE.MathUtils.clamp(this.pitch, -1.2, 0.9);
       this.pos.copy(SEATS[this.seat].pos);
@@ -95,6 +105,9 @@ export class Player {
     if (this.stamina <= 0) this.tired = true;
     if (this.stamina > 25) this.tired = false;
     const sprinting = input.down('ShiftLeft') && moving && !this.tired;
+    this.sprinting = sprinting;
+    const strafe = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
+    this.lean += ((this.onGround ? -strafe * (sprinting ? 0.022 : 0.014) : 0) - this.lean) * Math.min(1, dt * 7);
     const bz = this.boost.t > 0 ? this.boost : { drain: 1, regen: 1 };
     this.boost.t = Math.max(0, this.boost.t - dt);
     this.stamina = Math.max(0, Math.min(100, this.stamina + (sprinting ? -PLAYER.sprintDrain * bz.drain : PLAYER.sprintRegen * bz.regen) * dt));
@@ -155,7 +168,10 @@ export class Player {
       l = this.toLocal(wx, wz);
     }
     if (this.pos.y <= floor + 0.001) {
-      if (floor - this.pos.y <= PLAYER.stepUp || this.vel.y <= 0) { this.pos.y = floor; this.vel.y = Math.max(0, this.vel.y); this.onGround = true; }
+      if (floor - this.pos.y <= PLAYER.stepUp || this.vel.y <= 0) {
+        if (!this.onGround && this.vel.y < -2) this.dipV -= Math.min(7, -this.vel.y) * 0.22; // knees bend on landing
+        this.pos.y = floor; this.vel.y = Math.max(0, this.vel.y); this.onGround = true;
+      }
     } else if (this.pos.y > floor + 0.05) this.onGround = false;
 
     // write back & handle frame transitions
@@ -224,8 +240,18 @@ export class Player {
     const rb = this.inRV ? this.rumble : 0;
     const ry = (Math.sin(t * 61) * 0.6 + Math.sin(t * 37.3) * 0.4) * rb * 0.004;
     const rr = Math.sin(t * 23.1) * rb * 0.0015;
-    this.camera.position.set(this.pos.x + (Math.random() - 0.5) * sh, this.pos.y + eye + bob + ry + (Math.random() - 0.5) * sh, this.pos.z);
-    this.camera.rotation.set(this.pitch + this.kickP + (Math.random() - 0.5) * sh * 0.5, this.yaw, rr + (Math.random() - 0.5) * sh * 0.3, 'YXZ');
+    // landing dip: a damped spring on eye height
+    this.dipV += (-this.dip * 130 - this.dipV * 17) * 0.016;
+    this.dip = Math.max(-0.22, this.dip + this.dipV * 0.016);
+    const tx = this.pos.x, ty = this.pos.y + eye + bob + ry + this.dip, tz = this.pos.z;
+    if (this.easePending) {
+      this.easePending = false;
+      this.ease.set(this.camera.position.x - tx, this.camera.position.y - ty, this.camera.position.z - tz);
+      if (this.ease.lengthSq() > 9) this.ease.set(0, 0, 0);
+    }
+    this.ease.multiplyScalar(0.86);
+    this.camera.position.set(tx + this.ease.x + (Math.random() - 0.5) * sh, ty + this.ease.y + (Math.random() - 0.5) * sh, tz + this.ease.z);
+    this.camera.rotation.set(this.pitch + this.kickP + (Math.random() - 0.5) * sh * 0.5, this.yaw, rr + this.lean + (Math.random() - 0.5) * sh * 0.3, 'YXZ');
   }
 
   /** Camera pitch nudge (gear change, brake slam). + = look down. */
