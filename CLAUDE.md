@@ -493,6 +493,13 @@ Bright chunky low‑poly toon desert, warm golden hour, ACES filmic tone mapping
   - **Tab crew board**: room code, road seed, heat, one row per player (colour, host / you, doing, holding, health, hunger), Kevin's last texts.
   - **`items2.glb`** (`art/items2.py`, `GLB_ITEMS2`): rocket fuel, stash, battery, catalytic converter, wheel, spare, fuse, sponge, suitcase, water, ice, cactus, cocktail, rock.
   - **`rvinterior.glb`** (`art/rvinterior.py`, placed by `rv/RVInterior.ts`): captain's chairs, dinette benches and table, stove top, sink with faucet. Each replaces the boxes listed in `RVModel.inHide` only if it loaded; colliders and surfaces stay procedural, and the seat models carry the seats' interact ids. The file also holds `overhead` and `cupholder`, not placed yet.
+- [x] **Agent playtest fixes** (from two scripted Haiku agents playing co-op through `?dev` hooks):
+  - Off-road: no damage for the first 1.5 s, then 0.15 integrity/s (was 0.4/s, silent), with a warning toast.
+  - Feedback toasts: "Hard hit! RV integrity N%" on big jolts, "nodding off" before the driver sleeps (hypno > 0.7), a `💳 −$X what → $Y left` toast for any charge of $10 or more, and a "put the patty in a bun" hint when feeding a plain patty. "Skillet is full" is throttled.
+  - Pace hint: every 3 game hours (to 24:00) a toast gives miles left and the average speedometer mph needed.
+  - `Host.handle` ignores an `act` without a string id (it used to crash the host page).
+  - Dev hooks (`window.game`, `?dev` only): `nearby`, `goto`, `use` (also `use('hull')` with a hammer or tape in hand), `useHeld`, `drop`, `held`, `hud`.
+  - The Playwright bridge that drives two players (host + client) over HTTP lives outside the repo; a playtest run is still unscored and not a balance verdict.
 ### Phase 7 — Voice chat, player list polish
 ### Phase 8 — Chapel finale, receipt, Electron + Steam
 
